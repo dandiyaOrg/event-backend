@@ -1,2 +1,2 @@
-# event-backend
+# dandiay-event-backend
 Backend for Dandiya Event
