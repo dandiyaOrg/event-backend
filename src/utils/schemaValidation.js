@@ -67,18 +67,12 @@ export const commonFields = {
     "string.empty": "OTP is required",
     "any.required": "OTP is required",
   }),
-  username: Joi.string()
-    .min(10)
-    .pattern(/^[a-z]+$/)
-    .required()
-    .messages({
-      "string.base": "Username must be a string",
-      "string.empty": "Username is required",
-      "string.min": "Username must be at least {#limit} characters",
-      "string.pattern.base":
-        "Username must contain only lowercase letters with no numbers or special characters",
-      "any.required": "Username is required",
-    }),
+  username: Joi.string().min(6).required().messages({
+    "string.base": "Username must be a string",
+    "string.empty": "Username is required",
+    "string.min": "Username must be at least {#limit} characters",
+    "any.required": "Username is required",
+  }),
 };
 
 // admin registration schema

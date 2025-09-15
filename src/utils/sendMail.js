@@ -75,7 +75,7 @@ const sendMail = async (
   if (error) {
     console.error("Error sending email:", error);
   }
-  return { data, error };
+  return { emailData: data, error };
 };
 
 export default sendMail;
