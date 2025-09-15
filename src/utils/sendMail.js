@@ -4,6 +4,8 @@ import * as emailTemplates from "./emailTemplate.js";
 const appEmails = {
   sendOTP: "verify@rksahyog.com",
   sendTicket: "booking@rksahyog.com",
+  info: "info@rksahyog.com",
+  support: "support@rksahyog.com",
 };
 
 const emailTypeMap = {
@@ -23,6 +25,27 @@ const emailTypeMap = {
     subject: "Verify Your Email",
     template: ({ name, link, emailToken }) =>
       emailTemplates.emailVerfication({ name, link, emailToken }),
+  },
+  employeeRegistration: {
+    from: appEmails.info,
+    subject: "Employee Registration Successful",
+    template: ({ employee, admin }) =>
+      emailTemplates.employeeRegistrationEmail({
+        employee,
+        admin,
+        password,
+      }),
+  },
+  employeeCredentialsUpdate: {
+    from: appEmails.info,
+    subject: "Employee Credentials Updated",
+    template: ({ employee, admin }) =>
+      emailTemplates.employeeCredentialsUpdateEmail({
+        employee,
+        updatedFields,
+        admin,
+        password,
+      }),
   },
 };
 

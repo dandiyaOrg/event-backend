@@ -5,8 +5,42 @@ const app = express();
 import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
+import winston from "winston";
+import "winston-daily-rotate-file";
 
 import { errHandler } from "./middlewares/err.middleware.js";
+
+// Winston Logger Setup
+const dailyRotateFileTransport = new winston.transports.DailyRotateFile({
+  filename: "logs/application-%DATE%.log",
+  datePattern: "YYYY-MM-DD",
+  zippedArchive: true,
+  maxSize: "20m",
+  maxFiles: "14d",
+});
+
+const logger = winston.createLogger({
+  level: "info",
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      ),
+    }),
+    dailyRotateFileTransport,
+  ],
+});
+
+const morganStream = {
+  write: (message) => {
+    logger.info(message.trim());
+  },
+};
 
 const corsOptions = {
   origin: process.env.CORS_ORIGIN,
@@ -40,7 +74,7 @@ app.use(cookieParser());
 app.use(helmet());
 
 // Use morgan for HTTP request logging
-app.use(morgan("combined")); // 'combined' for detailed Apache-style logs
+app.use(morgan("combined", { stream: morganStream })); // Morgan using Winston stream
 
 // Use compression to gzip responses
 app.use(compression());
@@ -59,4 +93,4 @@ app.get("/", async (req, res, next) => {
 });
 
 app.use(errHandler);
-export { app };
+export { app, logger };
