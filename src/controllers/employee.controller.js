@@ -3,7 +3,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Op } from "sequelize";
 import Employee from "../db/models/employee.model.js";
-import { decryptPassword } from "../services/auth.service.js";
+import { decryptPassword } from "../utils/encrypt.js";
 import sendMail from "../utils/sendMail.js";
 import Admin from "../db/models/admin.model.js";
 
@@ -50,8 +50,8 @@ const createEmployee = asyncHandler(async (req, res, next) => {
     if (!admin) {
       return next(new ApiError(500, "Unable to find admin details"));
     }
-    const decryptedpassword = decryptPassword(newEmployeeemployee.password);
-    const emailData = await sendMail(
+    const decryptedpassword = decryptPassword(newEmployee.password);
+    const { emailData, error } = await sendMail(
       newEmployee.email,
       "employeeRegistration",
       {
@@ -61,7 +61,9 @@ const createEmployee = asyncHandler(async (req, res, next) => {
       }
     );
     if (!emailData || !emailData.id) {
-      return next(new ApiError(502, "Failed to employee registration email"));
+      return next(
+        new ApiError(502, "Failed to employee registration email", error)
+      );
     }
     return res
       .status(201)
@@ -73,6 +75,7 @@ const createEmployee = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
+    console.log("error in creating employee:", error);
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -204,7 +207,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       if (!admin) {
         return next(new ApiError(500, "Unable to find admin details"));
       }
-      const emailData = await sendMail(
+      const { emailData, error } = await sendMail(
         updatedEmployee.email,
         "employeeCredentialsUpdate",
         {
@@ -216,7 +219,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       );
       if (!emailData || !emailData.id) {
         return next(
-          new ApiError(502, "Failed to send credentials update email")
+          new ApiError(502, "Failed to send credentials update email", error)
         );
       }
     }
