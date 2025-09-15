@@ -4,6 +4,8 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { Op } from "sequelize";
 import Employee from "../db/models/employee.model.js";
 import { decryptPassword } from "../services/auth.service.js";
+import sendMail from "../utils/sendMail.js";
+import Admin from "../db/models/admin.model.js";
 
 const createEmployee = asyncHandler(async (req, res, next) => {
   try {
@@ -44,6 +46,23 @@ const createEmployee = asyncHandler(async (req, res, next) => {
       admin_id,
     });
 
+    const admin = await Admin.findByPk(admin_id);
+    if (!admin) {
+      return next(new ApiError(500, "Unable to find admin details"));
+    }
+    const decryptedpassword = decryptPassword(newEmployeeemployee.password);
+    const emailData = await sendMail(
+      newEmployee.email,
+      "employeeRegistration",
+      {
+        employee: newEmployee,
+        admin,
+        password: decryptedpassword,
+      }
+    );
+    if (!emailData || !emailData.id) {
+      return next(new ApiError(502, "Failed to employee registration email"));
+    }
     return res
       .status(201)
       .json(
@@ -162,6 +181,13 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       decryptedpassword = decryptPassword(employee.password);
     }
 
+    const updatedFields = [];
+    if (email && email !== employee.email) updatedFields.push("email");
+    if (username && username !== employee.username)
+      updatedFields.push("username");
+    if (password) updatedFields.push("password");
+
+    // Find which credentials fields actually changed
     const updatedEmployee = await employee.update({
       name: name ?? employee.name,
       mobile_no: mobile_no ?? employee.mobile_no,
@@ -171,6 +197,29 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       is_active: is_active ?? employee.is_active,
     });
 
+    // Send email only if email, username, or password changed
+    if (updatedFields.length > 0) {
+      const admin_id = req.admin_id;
+      const admin = await Admin.findByPk(admin_id);
+      if (!admin) {
+        return next(new ApiError(500, "Unable to find admin details"));
+      }
+      const emailData = await sendMail(
+        updatedEmployee.email,
+        "employeeCredentialsUpdate",
+        {
+          employee: updatedEmployee,
+          updatedFields,
+          admin,
+          password: decryptedpassword ?? "",
+        }
+      );
+      if (!emailData || !emailData.id) {
+        return next(
+          new ApiError(502, "Failed to send credentials update email")
+        );
+      }
+    }
     return res.status(201).json(
       new ApiResponse(
         201,

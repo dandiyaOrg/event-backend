@@ -138,9 +138,112 @@ const adminOtpLoginEmail = ({
   `;
 };
 
+const employeeRegistrationEmail = ({
+  employee = {},
+  admin = {},
+  password = "",
+  title = "Welcome to the Team!",
+  time = new Date(),
+}) => {
+  return `
+  <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:40px;">
+    <div style="max-width:430px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:32px 28px;">
+      <div style="text-align:center;">
+        <img src="https://cdn-icons-png.flaticon.com/512/2206/2206368.png"
+             alt="Employee Registered" style="width:60px;height:60px;margin-bottom:14px;" />
+        <h2 style="font-size:22px;font-weight:700;margin:0 0 10px;color:#212529;">
+          ${title}
+        </h2>
+        <p style="color:#6c757d;font-size:14px;">${time.toLocaleString()}</p>
+      </div>
+      <hr style="margin:18px 0;border:none;border-top:1px solid #e7e7e7;" />
+      <p style="font-size:15px;margin:12px 0 8px;line-height:1.6;">
+        Dear <b>${employee.name || "Employee"}</b>,
+      </p>
+      <p style="font-size:15px;color:#43484d;line-height:1.5;margin-bottom:20px;">
+        Your registration as an employee has been successfully completed!
+      </p>
+      <div style="background:#f4f7fa;border-radius:8px;padding:18px 24px;margin:16px 0;">
+        <h3 style="font-size:15px;margin:0 0 10px 0;color:#007bff;">Your Details:</h3>
+        <ul style="list-style:none;margin:0;padding:0;font-size:14px;">
+          <li><b>Name:</b> ${employee.name || "-"}</li>
+          <li><b>Email:</b> ${employee.email || "-"}</li>
+          <li><b>Username:</b> ${employee.username || "-"}</li>
+          <li><b>Password:</b> ${password || "(as set during registration)"}</li>
+        </ul>
+      </div>
+      <p style="font-size:13px;color:#6c757d;margin:18px 0 0 0;line-height:1.5;">
+        Please keep your login credentials safe. If you face any issues logging in, contact your administrator.
+      </p>
+      <hr style="margin:16px 0 10px 0;border-top:1px solid #ececec;" />
+      <div style="font-size:13px;color:#444;margin-top:10px;">
+        Registered by: <b>${admin.name || "Admin"}</b><br>
+        ${admin.organization ? "Organization: " + admin.organization + "<br>" : ""}
+        ${admin.email ? `Admin Email: <a href="mailto:${admin.email}" style="color:#2065d1;">${admin.email}</a><br>` : ""}
+      </div>
+      <div style="color:#bbbbbb;font-size:11px;text-align:center;margin-top:26px;">
+        © ${new Date().getFullYear()} ${admin.organization || ""}
+      </div>
+    </div>
+  </div>
+  `;
+};
+
+const employeeCredentialsUpdateEmail = ({
+  employee = {},
+  updatedFields = [],
+  admin = {},
+  password = "",
+  title = "Employee Credentials Updated",
+  time = new Date(),
+}) => {
+  const details = [];
+  if (updatedFields.includes("email")) {
+    details.push(`<li><b>Email:</b> ${employee.email || "-"}</li>`);
+  }
+  if (updatedFields.includes("username")) {
+    details.push(`<li><b>Username:</b> ${employee.username || "-"}</li>`);
+  }
+  if (updatedFields.includes("password")) {
+    details.push(`<li><b>Password:</b> ${password || "-"}</li>`);
+  }
+
+  return `
+  <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:40px;">
+    <div style="max-width:410px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:30px 24px;">
+      <div style="text-align:center;">
+        <img src="https://cdn-icons-png.flaticon.com/512/3652/3652191.png" alt="Update" style="width:44px;height:44px;margin-bottom:13px;" />
+        <h2 style="font-size:20px;font-weight:700;margin:0 0 10px 0;color:#212529;">
+          ${title}
+        </h2>
+        <p style="color:#6c757d;font-size:13px;">${time.toLocaleString()}</p>
+      </div>
+      <hr style="margin:16px 0;border-top:1px solid #e7e7e7;" />
+      <p style="font-size:15px;margin:10px 0 15px 0;line-height:1.6;">
+        Dear <b>${employee.name || "Employee"}</b>,<br>
+        The following account credentials have been updated:
+      </p>
+      <ul style="list-style:none;padding:0;margin:0 0 10px 0;font-size:14px;">
+        ${details.join("")}
+      </ul>
+      <hr style="margin:14px 0;border-top:1px solid #ececec;" />
+      <div style="font-size:12.5px;color:#444;margin-top:6px;">
+        Updated by: <b>${admin.name || "Admin"}</b><br>
+        ${admin.organization ? "Organization: " + admin.organization + "<br>" : ""}
+      </div>
+      <div style="color:#bbbbbb;font-size:11px;text-align:center;margin-top:18px;">
+        © ${new Date().getFullYear()} ${admin.organization || ""}
+      </div>
+    </div>
+  </div>
+  `;
+};
+
 export {
   adminOtpLoginEmail,
   emailVerfication,
   passwordVerfication,
   afterRegistrationSuccess,
+  employeeRegistrationEmail,
+  employeeCredentialsUpdateEmail,
 };
