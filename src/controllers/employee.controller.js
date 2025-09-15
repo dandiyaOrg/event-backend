@@ -135,9 +135,9 @@ const loginEmployee = asyncHandler(async (req, res, next) => {
 const updateEmployee = asyncHandler(async (req, res, next) => {
   try {
     const { name, mobile_no, email, password, username, is_active } = req.body;
-    const employee_id = req.params.employee_id;
-    if (!employee_id) {
-      return next(new ApiError(400, "employee_id is required in params"));
+    const employeeId = req.params.employeeId;
+    if (!employeeId) {
+      return next(new ApiError(400, "employeeId is required in params"));
     }
     // Check if all update fields are missing or empty
     if (
@@ -150,7 +150,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       );
     }
 
-    const employee = await Employee.findByPk(employee_id);
+    const employee = await Employee.findByPk(employeeId);
     if (!employee) {
       return next(new ApiError(404, "Employee not found"));
     }
@@ -163,7 +163,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
             mobile_no ? { mobile_no } : null,
             username ? { username } : null,
           ].filter(Boolean),
-          employee_id: { [Op.ne]: employee_id },
+          employee_id: { [Op.ne]: employeeId },
         },
       });
 
@@ -286,13 +286,13 @@ const getAllEmployee = asyncHandler(async (req, res, next) => {
 
 const deleteEmployee = asyncHandler(async (req, res, next) => {
   try {
-    const employee_id = req.params.employee_id;
+    const employeeId = req.params.employeeId;
 
-    if (!employee_id) {
-      return next(new ApiError(400, "employee_id is required in params"));
+    if (!employeeId) {
+      return next(new ApiError(400, "employeeId is required in params"));
     }
 
-    const employee = await Employee.findByPk(employee_id);
+    const employee = await Employee.findByPk(employeeId);
     if (!employee) {
       return next(new ApiError(404, "Employee not found"));
     }
@@ -304,8 +304,8 @@ const deleteEmployee = asyncHandler(async (req, res, next) => {
       .json(
         new ApiResponse(
           200,
-          { employee: employee_id },
-          `Employee with id ${employee_id} deleted successfully`
+          { employee: employeeId },
+          `Employee with id ${employeeId} deleted successfully`
         )
       );
   } catch (error) {
@@ -315,12 +315,12 @@ const deleteEmployee = asyncHandler(async (req, res, next) => {
 
 const toggleEmployeeStatus = asyncHandler(async (req, res, next) => {
   try {
-    const employee_id = req.params.employeeId;
-    if (!employee_id) {
-      return next(new ApiError(400, "employee_id is required in params"));
+    const employeeId = req.params.employeeId;
+    if (!employeeId) {
+      return next(new ApiError(400, "employeeId is required in params"));
     }
 
-    const employee = await Employee.findByPk(employee_id);
+    const employee = await Employee.findByPk(employeeId);
     if (!employee) {
       return next(new ApiError(404, "Employee not found"));
     }
