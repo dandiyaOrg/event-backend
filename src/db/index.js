@@ -1,3 +1,5 @@
+import dotenv from "dotenv";
+dotenv.config(); 
 import Sequelize from "sequelize";
 // import fs from "fs";
 // import path from "path";
