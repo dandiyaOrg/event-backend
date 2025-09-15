@@ -77,14 +77,18 @@ const loginWithEmail = asyncHandler(async (req, res, next) => {
     const otp = admin.generateEmailOTP();
     await admin.save();
 
-    const emailData = await sendMail(admin.email, "sendVerificationOTP", {
-      admin,
-      otp,
-      title: "Admin Login OTP Verification",
-    });
+    const { emailData, error } = await sendMail(
+      admin.email,
+      "sendVerificationOTP",
+      {
+        admin,
+        otp,
+        title: "Admin Login OTP Verification",
+      }
+    );
     if (!emailData || !emailData.id) {
       return next(
-        new ApiError(502, "Failed to send OTP email, please try again")
+        new ApiError(502, "Failed to send OTP email, please try again", error)
       );
     }
     return res

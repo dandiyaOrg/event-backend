@@ -29,7 +29,7 @@ const emailTypeMap = {
   employeeRegistration: {
     from: appEmails.info,
     subject: "Employee Registration Successful",
-    template: ({ employee, admin }) =>
+    template: ({ employee, admin, password }) =>
       emailTemplates.employeeRegistrationEmail({
         employee,
         admin,
@@ -39,7 +39,7 @@ const emailTypeMap = {
   employeeCredentialsUpdate: {
     from: appEmails.info,
     subject: "Employee Credentials Updated",
-    template: ({ employee, admin }) =>
+    template: ({ employee, admin, updatedFields, password }) =>
       emailTemplates.employeeCredentialsUpdateEmail({
         employee,
         updatedFields,
@@ -66,14 +66,16 @@ const sendMail = async (
       ? await emailConfig.template(templateData)
       : emailConfig.template;
 
-  const { data } = await resend.emails.send({
+  const { data, error } = await resend.emails.send({
     from: emailConfig.from,
     to: Array.isArray(to) ? to : [to],
     subject: emailConfig.subject,
     html,
   });
-
-  return data;
+  if (error) {
+    console.error("Error sending email:", error);
+  }
+  return { data, error };
 };
 
 export default sendMail;
