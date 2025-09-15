@@ -3,7 +3,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Op } from "sequelize";
 import Employee from "../db/models/employee.model.js";
-import { decryptPassword } from "../services/auth.service.js";
+import { decryptPassword } from "../utils/encrypt.js";
 import sendMail from "../utils/sendMail.js";
 import Admin from "../db/models/admin.model.js";
 
@@ -50,8 +50,8 @@ const createEmployee = asyncHandler(async (req, res, next) => {
     if (!admin) {
       return next(new ApiError(500, "Unable to find admin details"));
     }
-    const decryptedpassword = decryptPassword(newEmployeeemployee.password);
-    const emailData = await sendMail(
+    const decryptedpassword = decryptPassword(newEmployee.password);
+    const { emailData, error } = await sendMail(
       newEmployee.email,
       "employeeRegistration",
       {
@@ -61,7 +61,9 @@ const createEmployee = asyncHandler(async (req, res, next) => {
       }
     );
     if (!emailData || !emailData.id) {
-      return next(new ApiError(502, "Failed to employee registration email"));
+      return next(
+        new ApiError(502, "Failed to employee registration email", error)
+      );
     }
     return res
       .status(201)
@@ -73,6 +75,7 @@ const createEmployee = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
+    console.log("error in creating employee:", error);
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -132,9 +135,9 @@ const loginEmployee = asyncHandler(async (req, res, next) => {
 const updateEmployee = asyncHandler(async (req, res, next) => {
   try {
     const { name, mobile_no, email, password, username, is_active } = req.body;
-    const employee_id = req.params.employee_id;
-    if (!employee_id) {
-      return next(new ApiError(400, "employee_id is required in params"));
+    const employeeId = req.params.employeeId;
+    if (!employeeId) {
+      return next(new ApiError(400, "employeeId is required in params"));
     }
     // Check if all update fields are missing or empty
     if (
@@ -147,7 +150,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       );
     }
 
-    const employee = await Employee.findByPk(employee_id);
+    const employee = await Employee.findByPk(employeeId);
     if (!employee) {
       return next(new ApiError(404, "Employee not found"));
     }
@@ -160,7 +163,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
             mobile_no ? { mobile_no } : null,
             username ? { username } : null,
           ].filter(Boolean),
-          employee_id: { [Op.ne]: employee_id },
+          employee_id: { [Op.ne]: employeeId },
         },
       });
 
@@ -204,7 +207,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       if (!admin) {
         return next(new ApiError(500, "Unable to find admin details"));
       }
-      const emailData = await sendMail(
+      const { emailData, error } = await sendMail(
         updatedEmployee.email,
         "employeeCredentialsUpdate",
         {
@@ -216,7 +219,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       );
       if (!emailData || !emailData.id) {
         return next(
-          new ApiError(502, "Failed to send credentials update email")
+          new ApiError(502, "Failed to send credentials update email", error)
         );
       }
     }
@@ -283,13 +286,13 @@ const getAllEmployee = asyncHandler(async (req, res, next) => {
 
 const deleteEmployee = asyncHandler(async (req, res, next) => {
   try {
-    const employee_id = req.params.employee_id;
+    const employeeId = req.params.employeeId;
 
-    if (!employee_id) {
-      return next(new ApiError(400, "employee_id is required in params"));
+    if (!employeeId) {
+      return next(new ApiError(400, "employeeId is required in params"));
     }
 
-    const employee = await Employee.findByPk(employee_id);
+    const employee = await Employee.findByPk(employeeId);
     if (!employee) {
       return next(new ApiError(404, "Employee not found"));
     }
@@ -301,8 +304,8 @@ const deleteEmployee = asyncHandler(async (req, res, next) => {
       .json(
         new ApiResponse(
           200,
-          { employee: employee_id },
-          `Employee with id ${employee_id} deleted successfully`
+          { employee: employeeId },
+          `Employee with id ${employeeId} deleted successfully`
         )
       );
   } catch (error) {
@@ -312,12 +315,12 @@ const deleteEmployee = asyncHandler(async (req, res, next) => {
 
 const toggleEmployeeStatus = asyncHandler(async (req, res, next) => {
   try {
-    const employee_id = req.params.employeeId;
-    if (!employee_id) {
-      return next(new ApiError(400, "employee_id is required in params"));
+    const employeeId = req.params.employeeId;
+    if (!employeeId) {
+      return next(new ApiError(400, "employeeId is required in params"));
     }
 
-    const employee = await Employee.findByPk(employee_id);
+    const employee = await Employee.findByPk(employeeId);
     if (!employee) {
       return next(new ApiError(404, "Employee not found"));
     }
