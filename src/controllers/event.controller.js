@@ -6,6 +6,7 @@ import Admin from "../db/models/admin.model.js";
 import Event from "../db/models/event.model.js";
 import { Op, UUIDV1, UUIDV4 } from "sequelize";
 import sendMail from "../utils/sendMail.js";
+import { uploadOnCloudinary } from "../utils/clodinary.js";
 
 // Create the event
 
@@ -21,18 +22,18 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       date_start,
       date_end,
       event_type,
-      is_active,
-      status,
     } = req.body;
 
     // Validate required fields
     if (
       !event_name ||
-      !venue ||
+      !description ||
       !google_map_link ||
       !number_of_days ||
       !date_start ||
-      !date_end
+      !date_end ||
+      !venue ||
+      !event_type
     ) {
       return next(
         new ApiError(
@@ -46,7 +47,20 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     if (!req.file) {
       return next(new ApiError(400, "Design image is required"));
     }
-    const imageUrl = req.file.path;
+    const imagelocalPath = req.file?.buffer;
+    let imageUrl;
+    if (imagelocalPath) {
+      try {
+        const a = await uploadOnCloudinary(imagelocalPath);
+        imageUrl = a.url;
+      } catch (error) {
+        return next(
+          new ApiError(500, "Error on uploading design on clodinary", error)
+        );
+      }
+    } else {
+      imageUrl = null;
+    }
     // Check if admin exists
     const admin = await Admin.findByPk(req.admin_id);
     if (!admin) {
@@ -59,17 +73,14 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       description,
       venue,
       event_qr,
-      status,
       google_map_link,
       event_url: google_map_link,
-      type_of_event,
+      type_of_event: event_type,
       number_of_days,
       date_start,
       date_end,
-      event_type,
-      is_active,
       admin_id: req.admin_id,
-      image: imageUrl, // Save uploaded image URL
+      event_image: imageUrl,
     });
 
     if (newEvent) {
@@ -82,7 +93,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
             "Event created successfully"
           )
         );
-      // send mail to the admin about the event -- check this part 
+      // send mail to the admin about the event -- check this part
       const admin = await Admin.findByPk(req.admin_id);
       const response = await sendMail(
         admin.email, // make sure you pass the email, not the whole object
@@ -173,11 +184,11 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
 const updateEvent = asyncHandler(async (req, res, next) => {
   try {
     const { id } = req.params;
-    const updates = req.body; 
+    const updates = req.body;
 
     const [updatedRows, [updatedEvent]] = await Event.update(updates, {
       where: { event_id: id },
-      returning: true, 
+      returning: true,
     });
 
     if (updatedRows === 0) {
@@ -264,9 +275,7 @@ const filterEventData = asyncHandler(async (req, res, next) => {
   }
 });
 
-
-
-// filter by type_of_event-- working fine 
+// filter by type_of_event-- working fine
 
 const FilterByTypeOfEvents = asyncHandler(async (req, resp, next) => {
   try {

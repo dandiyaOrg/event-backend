@@ -98,10 +98,6 @@ const BillingUser = sequelize.define(
         isIn: [["Male", "Female", "Other"]],
       },
     },
-    admin_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-    },
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
@@ -119,6 +115,10 @@ const BillingUser = sequelize.define(
     createdAt: "created_at",
     updatedAt: "updated_at",
     indexes: [
+      {
+        unique: true,
+        fields: ["mobile_no", "email"],
+      },
       {
         fields: ["email"],
       },

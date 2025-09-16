@@ -13,7 +13,7 @@ import Transaction from "./transaction.model.js";
 import IssuedPass from "./issuedpass.model.js";
 import CheckingRecord from "./checkin.record.model.js";
 import PassSubEvent from "./pass.subevent.model.js";
-
+import EventBillingUsers from "./eventBillingUser.model.js";
 // Define associations
 const defineAssociations = () => {
   // ==================== ADMIN RELATIONSHIPS ====================
@@ -78,6 +78,26 @@ const defineAssociations = () => {
     otherKey: "pass_id",
     as: "passes",
   });
+  // ==================== BILLING USER & EVENT MANY-TO-MANY ====================
+
+  BillingUser.belongsToMany(Event, {
+    through: EventBillingUsers,
+    foreignKey: "billing_user_id",
+    otherKey: "event_id",
+    as: "events",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  Event.belongsToMany(BillingUser, {
+    through: EventBillingUsers,
+    foreignKey: "event_id",
+    otherKey: "billing_user_id",
+    as: "billing_users",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
   // ==================== BILLING & ORDER RELATIONSHIPS ====================
 
   // BillingUser → Order (One-to-Many)
@@ -201,6 +221,22 @@ const defineAssociations = () => {
     foreignKey: "subevent_id",
     as: "subevent",
     onDelete: "RESTRICT",
+    onUpdate: "CASCADE",
+  });
+
+  // ==================== SUBEVENT → ATTENDEE (One-to-Many) ====================
+
+  SubEvent.hasMany(Attendee, {
+    foreignKey: "subevent_id",
+    as: "attendees",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  Attendee.belongsTo(SubEvent, {
+    foreignKey: "subevent_id",
+    as: "subevent",
+    onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });
 

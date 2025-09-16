@@ -38,6 +38,16 @@ const Attendee = sequelize.define(
         notEmpty: true,
       },
     },
+    subevent_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: "subevents",
+        key: "subevent_id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "RESTRICT",
+    },
     dob: {
       type: DataTypes.DATEONLY,
       allowNull: true,
@@ -96,10 +106,6 @@ const Attendee = sequelize.define(
       defaultValue: DataTypes.NOW,
       allowNull: false,
     },
-    admin_id: {
-      type: DataTypes.UUID,
-      allowNull: false,
-    },
   },
   {
     tableName: "attendees",
@@ -107,6 +113,10 @@ const Attendee = sequelize.define(
     createdAt: "created_at",
     updatedAt: "updated_at",
     indexes: [
+      {
+        unique: true,
+        fields: ["whatsapp", "email", "subevent_id"],
+      },
       {
         fields: ["email"],
       },
