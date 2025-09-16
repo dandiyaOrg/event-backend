@@ -35,6 +35,14 @@ const Event = sequelize.define(
         len: [3, 200],
       },
     },
+    event_image: {
+      type: DataTypes.STRING(200),
+      allowNull: false,
+      validate: {
+        notEmpty: true,
+        len: [3, 200],
+      },
+    },
     status: {
       type: DataTypes.ENUM(
         "Initiated",
@@ -44,6 +52,7 @@ const Event = sequelize.define(
         "Cancelled"
       ),
       allowNull: false,
+      defaultValue: "Initiated",
       validate: {
         notEmpty: true,
         isIn: [["Initiated", "Active", "Ready", "Closed", "Cancelled"]],
