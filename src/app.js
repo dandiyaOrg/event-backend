@@ -78,8 +78,6 @@ app.use(morgan("combined", { stream: morganStream })); // Morgan using Winston s
 
 // Use compression to gzip responses
 app.use(compression());
-// app.use(passport.initialize());
-// app.use(passport.session());
 
 import adminRoutes from "./routes/admin.routes.js";
 import eventRoutes from "./routes/event.routes.js";

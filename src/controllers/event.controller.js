@@ -7,52 +7,34 @@ import Event from "../db/models/event.model.js";
 import { Op, UUIDV1, UUIDV4 } from "sequelize";
 import sendMail from "../utils/sendMail.js";
 import { uploadOnCloudinary } from "../utils/clodinary.js";
+import { generateQRCodeAndUpload } from "../services/qrGenerator.service.js";
 
 // Create the event
 
 // Controller to register an event-- working fine (change the things before push )
 const registerEvent = asyncHandler(async (req, res, next) => {
   try {
-    const {
-      event_name,
-      description,
-      venue,
-      google_map_link,
-      number_of_days,
-      date_start,
-      date_end,
-      event_type,
-    } = req.body;
+    const { event_name, description, venue, google_map_link, number_of_days, date_start, date_end, event_type } = req.body;
 
     // Validate required fields
-    if (
-      !event_name ||
-      !description ||
-      !google_map_link ||
-      !number_of_days ||
-      !date_start ||
-      !date_end ||
-      !venue ||
-      !event_type
-    ) {
-      return next(
-        new ApiError(
-          400,
-          "Event name, venue, google map link, number of days, start and end date are required fields"
-        )
-      );
+    if (!(event_name && description && google_map_link && number_of_days && date_start && date_end && venue && event_type)) {
+      return next(new ApiError( 400, "Event name, venue, google map link, number of days, start and end date are required fields"));
     }
 
     // Ensure image is uploaded
-    if (!req.file) {
-      return next(new ApiError(400, "Design image is required"));
+    if (!(req.file)) {
+      return next(new ApiError(400, "Event image is required"));
     }
-    const imagelocalPath = req.file?.buffer;
+
+    const imagelocalPath = req.file?.path;
+    console.log(imagelocalPath)
     let imageUrl;
     if (imagelocalPath) {
       try {
         const a = await uploadOnCloudinary(imagelocalPath);
+        console.log(a)
         imageUrl = a.url;
+        console.log(imageUrl)
       } catch (error) {
         return next(
           new ApiError(500, "Error on uploading design on clodinary", error)
@@ -61,6 +43,9 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     } else {
       imageUrl = null;
     }
+
+    console.log(imageUrl) 
+
     // Check if admin exists
     const admin = await Admin.findByPk(req.admin_id);
     if (!admin) {
@@ -72,24 +57,41 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       event_name,
       description,
       venue,
-      event_qr,
+      event_qr: null ,
       google_map_link,
-      event_url: google_map_link,
+      event_url: null,
       type_of_event: event_type,
       number_of_days,
       date_start,
       date_end,
-      admin_id: req.admin_id,
+      admin_id: req.admin_id, 
       event_image: imageUrl,
     });
 
-    if (newEvent) {
+    if (!newEvent) {
+      return next(new ApiError(400, "Failed to create event"));
+    }
+
+    const qrResult = await generateQRCodeAndUpload(newEvent.event_id);
+
+    if (!qrResult.success) {
+      return next(new ApiError(500, "Failed to generate event QR", qrResult.error));
+    }
+
+    console.log(qrResult)
+
+    newEvent.event_qr = qrResult.cloudinaryUrl;
+    newEvent.event_url = qrResult.qrContentUrl;
+
+    const updatedEvent = await newEvent.save();
+
+    if (updatedEvent) {
       return res
         .status(200)
         .json(
           new ApiResponse(
             201,
-            { event: newEvent },
+            { event: updatedEvent },
             "Event created successfully"
           )
         );

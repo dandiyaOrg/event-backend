@@ -29,7 +29,7 @@ const Event = sequelize.define(
     },
     event_url: {
       type: DataTypes.STRING(200),
-      allowNull: false,
+      allowNull: true,
       validate: {
         notEmpty: true,
         len: [3, 200],
@@ -60,7 +60,7 @@ const Event = sequelize.define(
     },
     event_qr: {
       type: DataTypes.STRING(200),
-      allowNull: false,
+      allowNull: true,
       validate: {
         notEmpty: true,
         len: [3, 200],

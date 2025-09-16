@@ -6,31 +6,41 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const uploadOnCloudinary = async (buffer) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: "dandiya-event" }, // Specify the folder name here
-      (error, result) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve(result);
-        }
-      }
-    );
-    stream.end(buffer);
+// const uploadOnCloudinary = async (buffer) => {
+//   return new Promise((resolve, reject) => {
+//     const stream = cloudinary.uploader.upload_stream(
+//       { folder: "dandiya-event", resource_type: "image" }, // Specify the folder name here
+//       (error, result) => {
+//         if (error) {
+//           reject(error);
+//         } else {
+//           resolve(result);
+//         }
+//       }
+//     );
+//     stream.end(buffer);
+//   });
+// };
+
+const uploadOnCloudinary = async (filePath) => {
+  return cloudinary.uploader.upload(filePath, {
+    folder: "dandiya-event",
+    resource_type: "image",
   });
 };
+
 const uploadQRCodeToCloudinary = async (base64String) => {
   try {
-    const base64Data = base64String.replace(/^data:image\/png;base64,/, "");
-    const buffer = Buffer.from(base64Data, "base64");
-    const result = await uploadOnCloudinary(buffer);
+    const result = await cloudinary.uploader.upload(base64String, {
+      folder: "dandiya-event",
+      resource_type: "image",
+    });
     return { success: true, data: result.secure_url };
   } catch (error) {
-    return { success: false, error: error };
+    return { success: false, error };
   }
 };
+
 function getimagepublicid(url) {
   const parts = url.split("/");
   const public_id_segment = parts[parts.indexOf("upload") + 2]; // Get the segment after 'upload'
@@ -42,6 +52,7 @@ function getimagepublicid(url) {
   console.log(public_id); // Output: p5dbvx6rdx5sp7szocxj
   return public_id;
 }
+
 const deletefromCloudinary = async (clodinaryfilePaths, resource_type) => {
   try {
     let paths = [];
