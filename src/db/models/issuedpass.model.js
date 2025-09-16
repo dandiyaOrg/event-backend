@@ -99,10 +99,6 @@ const IssuedPass = sequelize.define(
         isIn: [["active", "used", "expired", "cancelled", "refunded"]],
       },
     },
-    qr_image: {
-      type: DataTypes.TEXT, // Base64 encoded image or file path
-      allowNull: true,
-    },
     used_count: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
