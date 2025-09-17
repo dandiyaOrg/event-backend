@@ -284,6 +284,64 @@ const getAllEmployee = asyncHandler(async (req, res, next) => {
   }
 });
 
+
+// bar search in employ 
+
+const SearchEmploy = asyncHandler(async (req, res, next) => {
+  try {
+    const inputtext = (req.query.inputtext || "").toLowerCase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = 25;
+    const offset = (page - 1) * limit;
+
+    // search based on name, mobile_no, email, username
+    const { count, rows: employees } = await Employee.findAndCountAll({
+      where: {
+        [Op.or]: [
+          { name: { [Op.like]: `%${inputtext}%` } },
+          { mobile_no: { [Op.like]: `%${inputtext}%` } },
+          { email: { [Op.like]: `%${inputtext}%` } },
+          { username: { [Op.like]: `%${inputtext}%` } },
+        ],
+      },
+      limit,
+      offset,
+      order: [["created_at", "DESC"]],
+    });
+
+    const employeeList = employees.map((emp) => ({
+      employee_id: emp.employee_id,
+      name: emp.name,
+      mobile_no: emp.mobile_no,
+      email: emp.email,
+      username: emp.username,
+      is_active: emp.is_active,
+      password: emp.password,
+      admin_id: emp.admin_id,
+    }));
+
+    const totalPages = Math.ceil(count / limit);
+
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          employees: employeeList,
+          pagination: {
+            totalEmployees: count,
+            currentPage: page,
+            totalPages,
+            perPage: limit,
+          },
+        },
+        "Employees fetched successfully"
+      )
+    );
+  } catch (error) {
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
 const deleteEmployee = asyncHandler(async (req, res, next) => {
   try {
     const employeeId = req.params.employeeId;

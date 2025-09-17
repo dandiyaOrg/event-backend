@@ -2,7 +2,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import SubEvent from "../db/models/subevent.model.js";
-import { validate as isUUID } from "uuid"; 
+import { validate as isUUID } from "uuid";
 import { Op, UUIDV1, UUIDV4 } from "sequelize";
 // Create a SubEvent in an Event - working fine
 const createSubEvent = asyncHandler(async (req, res, next) => {
@@ -32,7 +32,7 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
     const newSubEvent = await SubEvent.create({
       name,
       description,
-      event_id: eventId, 
+      event_id: eventId,
       admin_id,
       date,
       start_time,
@@ -43,18 +43,19 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
       images,
     });
 
-    return res.status(201).json(
-      new ApiResponse(
-        201,
-        { subEvent: newSubEvent },
-        "SubEvent created successfully"
-      )
-    );
+    return res
+      .status(201)
+      .json(
+        new ApiResponse(
+          201,
+          { subEvent: newSubEvent },
+          "SubEvent created successfully"
+        )
+      );
   } catch (error) {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
 
 // delete the subevent  -- working fine
 
@@ -134,47 +135,72 @@ const getSubEventById = asyncHandler(async (req, res, next) => {
   }
 });
 
-// filter the subevent with search- working fine 
-
+// filter the subevent  inside the event - working fine
 const filterSubEvents = asyncHandler(async (req, res, next) => {
   try {
-    const { eventId } = req.params;
-    const { query } = req.query;
+    const event_id = req.query.event_id;
+    const inputtext = (req.query.inputtext || "").toLowerCase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = 25;
+    const offset = (page - 1) * limit;
 
-    if (!query) {
-      return next(new ApiError(400, "Search query is required"));
-    }
-
-    if (!eventId || !isUUID(eventId)) {
-      return next(new ApiError(400, "Valid Event ID is required"));
-    }
-
-    const data = await SubEvent.findAll({
+    const { count, rows: subevents } = await SubEvent.findAndCountAll({
       where: {
-        event_id: eventId, 
-        name: {
-          [Op.iLike]: `%${query}%`,
-        },
+        event_id,
+        ...(inputtext && {
+          [Op.or]: [
+            { name: { [Op.like]: `%${inputtext}%` } },
+          ],
+        }),
       },
+      limit,
+      offset,
+      order: [["created_at", "DESC"]],
     });
 
-    return res.status(200).json({
-      success: true,
-      count: data.length,
-      data,
-    });
+    const subEventList = subevents.map((e) => ({
+      subevent_id: e.subevent_id,
+      name: e.name,
+      admin_id: e.admin_id,
+      description: e.description,
+      date: e.date,
+      start_time: e.start_time,
+      end_time: e.end_time,
+      day: e.day,
+      quantity: e.quantity,
+      available_quantity: e.available_quantity,
+      images: e.images,
+    }));
+
+    const totalPages = Math.ceil(count / limit);
+
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          subevents: subEventList,
+          pagination: {
+            totalSubEvents: count,
+            currentPage: page,
+            totalPages,
+            perPage: limit,
+          },
+        },
+        "SubEvents fetched successfully"
+      )
+    );
   } catch (error) {
-    console.error(error); 
-    next(new ApiError(500, "Internal Server Error", error.message));
+    return next(new ApiError(500, "Internal Server Error", error));
   }
 });
+
 
 // update the sub event -- working checked
 
 const UpdatetheSubevent = asyncHandler(async (req, res, next) => {
   try {
     const { eventId, subEventId } = req.params;
-    const updateData = req.body; 
+    const updateData = req.body;
 
     if (!eventId || !subEventId) {
       return next(new ApiError(400, "eventId and subEventId are required"));
@@ -192,16 +218,15 @@ const UpdatetheSubevent = asyncHandler(async (req, res, next) => {
     // Update sub-event
     await subEvent.update(updateData);
 
-    return res.status(200).json(
-      new ApiResponse(200, { subEvent }, "SubEvent updated successfully")
-    );
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, { subEvent }, "SubEvent updated successfully")
+      );
   } catch (error) {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
-
- 
 
 export {
   createSubEvent,
@@ -209,5 +234,5 @@ export {
   getAllSubeventOfEvent,
   getSubEventById,
   filterSubEvents,
-  UpdatetheSubevent
+  UpdatetheSubevent,
 };

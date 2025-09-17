@@ -25,11 +25,14 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
   dialect: "postgres",
   logging: false,
   dialectOptions: {
-    ssl: {
-      require: true,
-      rejectUnauthorized: false,
-    },
+    ssl: false
   },
+  // dialectOptions: {
+  //   ssl: {
+  //     require: false,
+  //     rejectUnauthorized: false,
+  //   },
+  // },
   pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
   timezone: "+05:30",
 });

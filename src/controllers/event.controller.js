@@ -52,7 +52,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       return next(new ApiError(404, "Admin not found"));
     }
 
-    // Create the event
+    
     const newEvent = await Event.create({
       event_name,
       description,
@@ -133,6 +133,8 @@ const registerEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
+
+
 // Delete event by ID -- working fine
 const deleteEvent = asyncHandler(async (req, res, next) => {
   try {
@@ -142,7 +144,7 @@ const deleteEvent = asyncHandler(async (req, res, next) => {
     }
 
     // Check if the event exists
-    const event = await Event.findByPk(id);
+    const event = await Event.findOne({event_id:id});
     if (!event) {
       return next(new ApiError(404, "Event not found"));
     }
@@ -249,31 +251,64 @@ const getAllEventByAdmin = asyncHandler(async (req, res, next) => {
   }
 });
 
-// fiter the data -- working fine
+// fiter the data for search bar  -- working fine
 const filterEventData = asyncHandler(async (req, res, next) => {
   try {
-    const { query } = req.query;
+    const inputtext = (req.query.inputtext || "").toLowerCase();
+    const page = parseInt(req.query.page) || 1;
+    const limit = 25;
+    const offset = (page - 1) * limit;
 
-    if (!query) {
-      return next(new ApiError(400, "Search query is required"));
-    }
-
-    const data = await Event.findAll({
+    const { count, rows: event } = await Event.findAndCountAll({
       where: {
-        event_name: {
-          [Op.iLike]: `%${query}%`, // PostgreSQL case-insensitive
-        },
+        [Op.or]: [
+          { event_name: { [Op.like]: `%${inputtext}%` } },
+          { event_number: { [Op.like]: `%${inputtext}%` } },
+          { venue: { [Op.like]: `%${inputtext}%` } },
+        ],
       },
+      limit,
+      offset,
+      order: [["created_at", "DESC"]],
     });
 
+    const eventList = event.map((e) => ({
+      event_id: e.event_id,
+      event_number: e.event_number,
+      event_name: e.event_name,
+      event_url: e.event_url,
+      status: e.status,
+      event_qr: e.event_qr,
+      description: e.description,
+      venue: e.venue,
+      google_map_link: e.google_map_link,
+      type_of_event: e.type_of_event,
+      number_of_days: e.number_of_days,
+      date_start: e.date_start,
+      date_end: e.date_end,
+      admin_id: e.admin_id,
+      is_active: e.is_active,
+    }));
+
+    const totalPages = Math.ceil(count / limit);
+
     return res.status(200).json(
-      new ApiResponse(200, "Events fetched successfully", {
-        count: data.length,
-        events: data,
-      })
+      new ApiResponse(
+        200,
+        {
+          events: eventList,
+          pagination: {
+            totalEvents: count,
+            currentPage: page,
+            totalPages,
+            perPage: limit,
+          },
+        },
+        "Events fetched successfully"
+      )
     );
   } catch (error) {
-    next(error);
+    return next(new ApiError(500, "Internal Server Error", error));
   }
 });
 
