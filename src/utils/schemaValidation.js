@@ -112,7 +112,7 @@ export const commonFields = {
     "string.uri": "Google map link must be a valid URL",
     "any.required": "Google map link is required",
   }),
-  number_of_days: Joi.number().integer().min(1).required().messages({
+  integerSchema: Joi.number().integer().min(1).required().messages({
     "number.base": "Number of days must be a number",
     "number.integer": "Number of days must be an integer",
     "number.min": "Number of days must be at least {#limit}",
@@ -125,6 +125,13 @@ export const commonFields = {
       "string.pattern.name": "Date must be in YYYY-MM-DD format",
       "any.required": "Date is required",
     }),
+  timeSchema: Joi.string()
+    .pattern(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/, "HH:MM:SS")
+    .required()
+    .messages({
+      "string.pattern.name": "Time must be in HH:MM:SS format",
+      "any.required": "Time is required",
+    }),
   event_status: Joi.string()
     .valid("Initiated", "Active", "Ready", "Closed", "Cancelled")
     .required()
@@ -134,6 +141,14 @@ export const commonFields = {
       "any.only": "Initiated, Active, Ready, Closed, Cancelled",
       "any.required": "Event status is required",
     }),
+  idSchema: Joi.string().guid({ version: "uuidv4" }).required().messages({
+    "string.guid": "Event ID must be a valid UUIDv4",
+    "string.empty": "Event ID is required",
+    "any.required": "Event ID is required",
+  }),
+  image: Joi.any().required().messages({
+    "any.required": "Sub event image is required",
+  }),
 };
 
 // admin registration schema
@@ -176,10 +191,11 @@ const eventRegisterSchema = Joi.object({
   description: commonFields.description,
   venue: commonFields.venue,
   google_map_link: commonFields.url,
-  number_of_days: commonFields.number_of_days,
+  number_of_days: commonFields.integerSchema,
   date_start: commonFields.dateSchema,
   date_end: commonFields.dateSchema,
   event_type: commonFields.event_type,
+  image: commonFields.image,
 });
 
 const eventUpdateSchema = Joi.object({
@@ -187,17 +203,39 @@ const eventUpdateSchema = Joi.object({
   description: commonFields.description.optional(),
   venue: commonFields.venue.optional(),
   google_map_link: commonFields.url.optional(),
-  number_of_days: commonFields.number_of_days.optional(),
+  number_of_days: commonFields.integerSchema.optional(),
   date_start: commonFields.dateSchema.optional(),
   date_end: commonFields.dateSchema.optional(),
   event_type: commonFields.event_type.optional(),
-})
-  .min(1)
-  .unknown(true);
+  image: commonFields.image.optional(),
+}).min(1);
 
 const updateEventTypeSchema = Joi.object({
   status: commonFields.event_status.required(),
 });
+
+const subEventSchema = Joi.object({
+  name: commonFields.name,
+  event_id: commonFields.idSchema,
+  date: commonFields.dateSchema,
+  start_time: commonFields.timeSchema,
+  end_time: commonFields.timeSchema,
+  day: commonFields.integerSchema,
+  quantity: commonFields.integerSchema,
+  description: commonFields.description,
+  image: commonFields.image,
+});
+
+const updateSubEventSchema = Joi.object({
+  name: commonFields.name.optional(),
+  date: commonFields.dateSchema.optional(),
+  start_time: commonFields.timeSchema.optional(),
+  end_time: commonFields.timeSchema.optional(),
+  day: commonFields.integerSchema.optional(),
+  quantity: commonFields.integerSchema.optional(),
+  description: commonFields.description.optional(),
+  image: commonFields.image.optional(),
+}).min(1);
 
 export {
   adminRegisterSchema,
@@ -208,4 +246,6 @@ export {
   eventRegisterSchema,
   eventUpdateSchema,
   updateEventTypeSchema,
+  subEventSchema,
+  updateSubEventSchema,
 };

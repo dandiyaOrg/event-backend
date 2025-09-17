@@ -133,6 +133,10 @@ const SubEvent = sequelize.define(
     updatedAt: "updated_at",
     indexes: [
       {
+        fields: ["name", "event_id"],
+        unique: true,
+      },
+      {
         fields: ["event_id"],
       },
       {

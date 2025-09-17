@@ -3,14 +3,10 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import Admin from "../db/models/admin.model.js";
 import Event from "../db/models/event.model.js";
-import { Op } from "sequelize";
 import sendMail from "../utils/sendMail.js";
 import { uploadOnCloudinary } from "../utils/clodinary.js";
 import { generateQRCodeAndUpload } from "../services/qrGenerator.service.js";
 
-// Create the event
-
-// Controller to register an event-- working fine (change the things before push )
 const registerEvent = asyncHandler(async (req, res, next) => {
   try {
     const {
@@ -24,7 +20,6 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       event_type,
     } = req.body;
 
-    // Validate required fields
     if (
       !(
         event_name &&
@@ -173,7 +168,6 @@ const deleteEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
-// getEventDetails-- check working fine
 const getEventDetailById = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -191,7 +185,6 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
   }
 });
 
-// update event -- working fine
 const updateEvent = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -258,7 +251,7 @@ const updateEvent = asyncHandler(async (req, res, next) => {
 
     if (imageUrl) {
       if (previousImage) {
-        await deletefromCloudinary([event.previousImage], "image");
+        await deletefromCloudinary([previousImage], "image");
       }
     }
     return res
@@ -293,12 +286,9 @@ const updateEventStatus = asyncHandler(async (req, res, next) => {
   }
 });
 
-// get all event created by admin- done
 const getAllEventByAdmin = asyncHandler(async (req, res, next) => {
   try {
     const admin_id = req.admin_id;
-
-    // Find all events created by this admin
     const events = await Event.findAll({
       where: { admin_id: admin_id },
     });

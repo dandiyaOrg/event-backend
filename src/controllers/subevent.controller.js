@@ -1,78 +1,148 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
+import {
+  uploadOnCloudinary,
+  deletefromCloudinary,
+} from "../utils/clodinary.js";
 import SubEvent from "../db/models/subevent.model.js";
-import { validate as isUUID } from "uuid"; 
-import { Op, UUIDV1, UUIDV4 } from "sequelize";
-// Create a SubEvent in an Event - working fine
+import Event from "../db/models/event.model.js";
+import { validate as isUUID } from "uuid";
+import { Op } from "sequelize";
+
 const createSubEvent = asyncHandler(async (req, res, next) => {
   try {
-    const { eventId } = req.params; // get eventId from URL
     const {
       name,
-      admin_id,
+      event_id,
       date,
       start_time,
       end_time,
       day,
       quantity,
-      images,
       description,
     } = req.body;
 
-    if (!name || !eventId || !admin_id || !date || !start_time || !end_time) {
+    if (
+      !(name && event_id && date && start_time && end_time && day && quantity)
+    ) {
       return next(
         new ApiError(
           400,
-          "SubEvent name, event_id, admin_id, date, start_time, and end_time are required fields"
+          "SubEvent name, event_id, admin_id, date, start_time, end_time, quantity and day are required fields"
         )
       );
+    }
+
+    if (!req.file) {
+      return next(new ApiError(400, "Sub event image is required"));
+    }
+    const event = await Event.findByPk(event_id);
+    if (!event) {
+      return next(new ApiError(404, `Event with id ${event_id} not found`));
+    }
+    const existingEvent = await SubEvent.findOne({
+      where: { name: name, event_id: event_id },
+    });
+    if (existingEvent) {
+      return next(
+        new ApiError(
+          400,
+          "Sub event with this name already exists for the event"
+        )
+      );
+    }
+    const existingSubevent = await SubEvent.findOne({
+      where: { event_id: event_id, day: day },
+    });
+    if (existingSubevent) {
+      return next(
+        new ApiError(
+          400,
+          `Sub event for day ${day} already exists for the event`
+        )
+      );
+    }
+    const countSubevents = await SubEvent.count({
+      where: { event_id: event_id },
+    });
+    if (countSubevents >= event.number_of_days) {
+      return next(
+        new ApiError(
+          400,
+          `Cannot add more subevents. The event allows a maximum of ${event.number_of_days} subevents.`
+        )
+      );
+    }
+
+    const imagelocalPath = req.file?.path;
+
+    let imageUrl;
+    if (imagelocalPath) {
+      try {
+        const a = await uploadOnCloudinary(imagelocalPath);
+        imageUrl = a.url;
+      } catch (error) {
+        return next(
+          new ApiError(500, "Error on uploading design on clodinary", error)
+        );
+      }
+    } else {
+      imageUrl = null;
     }
 
     const newSubEvent = await SubEvent.create({
       name,
       description,
-      event_id: eventId, 
-      admin_id,
+      event_id,
+      admin_id: req.admin_id,
       date,
       start_time,
       end_time,
       day,
       quantity,
-      available_quantity: quantity,
-      images,
+      images: [imageUrl],
     });
 
-    return res.status(201).json(
-      new ApiResponse(
-        201,
-        { subEvent: newSubEvent },
-        "SubEvent created successfully"
-      )
-    );
+    return res
+      .status(201)
+      .json(
+        new ApiResponse(
+          201,
+          { subEvent: newSubEvent },
+          "SubEvent Registered successfully"
+        )
+      );
   } catch (error) {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
 
-
-// delete the subevent  -- working fine
-
 const deleteSubEvent = asyncHandler(async (req, res, next) => {
   try {
-    const { id } = req.params;
-    if (!id) {
+    const { eventId } = req.params;
+    if (!eventId) {
       return next(new ApiError(400, "SubEvent id is required"));
     }
 
-    // Find subevent by primary key
-    const subEvent = await SubEvent.findOne({ where: { subevent_id: id } });
+    const subEvent = await SubEvent.findOne({
+      where: { subevent_id: eventId },
+    });
 
     if (!subEvent) {
-      return next(new ApiError(404, `SubEvent with id ${id} not found`));
+      return next(new ApiError(404, `SubEvent with id ${eventId} not found`));
     }
 
-    // Delete the subevent
+    if (subEvent.images) {
+      try {
+        await deletefromCloudinary(subEvent.images, "image");
+      } catch (error) {
+        return next(
+          new ApiError(500, "Error in deleting the old image", error)
+        );
+      }
+    }
+
     await subEvent.destroy();
 
     return res
@@ -83,22 +153,22 @@ const deleteSubEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
-// Get all subevents of an event-- working fine
 const getAllSubeventOfEvent = asyncHandler(async (req, res, next) => {
   try {
-    const { eventId } = req.params; // event_id
+    const { event_id } = req.body;
 
-    if (!eventId) {
+    if (!event_id) {
       return next(new ApiError(400, "Event id is required"));
     }
 
-    // Find all subevents with this event_id
     const subEvents = await SubEvent.findAll({
-      where: { event_id: eventId },
+      where: { event_id: event_id },
     });
 
     if (!subEvents || subEvents.length === 0) {
-      return next(new ApiError(404, `No subevents found for event id ${id}`));
+      return next(
+        new ApiError(404, `No subevents found for event id ${event_id}`)
+      );
     }
 
     return res
@@ -109,21 +179,22 @@ const getAllSubeventOfEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
-// Get a subevent by its id -- working fine
 const getSubEventById = asyncHandler(async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const { subeventId } = req.params;
 
-    if (!id) {
+    if (!subeventId) {
       return next(new ApiError(400, "SubEvent id is required"));
     }
 
     const subEvent = await SubEvent.findOne({
-      where: { subevent_id: id },
+      where: { subevent_id: subeventId },
     });
 
     if (!subEvent) {
-      return next(new ApiError(404, `SubEvent with id ${id} not found`));
+      return next(
+        new ApiError(404, `SubEvent with id - ${subeventId} not found`)
+      );
     }
 
     return res
@@ -134,11 +205,9 @@ const getSubEventById = asyncHandler(async (req, res, next) => {
   }
 });
 
-// filter the subevent with search- working fine 
-
 const filterSubEvents = asyncHandler(async (req, res, next) => {
   try {
-    const { eventId } = req.params;
+    const { eventId } = req.body;
     const { query } = req.query;
 
     if (!query) {
@@ -151,57 +220,126 @@ const filterSubEvents = asyncHandler(async (req, res, next) => {
 
     const data = await SubEvent.findAll({
       where: {
-        event_id: eventId, 
+        event_id: eventId,
         name: {
           [Op.iLike]: `%${query}%`,
         },
       },
     });
 
-    return res.status(200).json({
-      success: true,
-      count: data.length,
-      data,
-    });
+    return res
+      .status(200)
+      .json(new ApiResponse(200, data, "Events fetched successfully"));
   } catch (error) {
-    console.error(error); 
+    console.error(error);
     next(new ApiError(500, "Internal Server Error", error.message));
   }
 });
 
-// update the sub event -- working checked
-
-const UpdatetheSubevent = asyncHandler(async (req, res, next) => {
+const UpdateSubevent = asyncHandler(async (req, res, next) => {
   try {
-    const { eventId, subEventId } = req.params;
-    const updateData = req.body; 
-
-    if (!eventId || !subEventId) {
+    const { subEventId } = req.params;
+    const { name, date, start_time, end_time, day, quantity, description } =
+      req.body;
+    if (!subEventId) {
       return next(new ApiError(400, "eventId and subEventId are required"));
     }
 
-    // Find sub-event
-    const subEvent = await SubEvent.findOne({
-      where: { subevent_id: subEventId, event_id: eventId },
-    });
-
+    const subEvent = await SubEvent.findByPk(subEventId);
     if (!subEvent) {
-      return next(new ApiError(404, "SubEvent not found"));
+      return next(
+        new ApiError(404, `SubEvent with id = ${subEventId} not found`)
+      );
+    }
+    let imageUrl;
+    if (req.file) {
+      const imagelocalPath = req.file?.path;
+      if (imagelocalPath) {
+        try {
+          const { success, data, error } =
+            await uploadOnCloudinary(imagelocalPath);
+          if (!success) {
+            return next(
+              new ApiError(
+                500,
+                "Error on uploading event image on clodinary",
+                error
+              )
+            );
+          }
+          imageUrl = data;
+        } catch (error) {
+          return next(
+            new ApiError(
+              500,
+              "Error on uploading event image on clodinary",
+              error
+            )
+          );
+        }
+      } else {
+        imageUrl = null;
+      }
+    }
+    if (day && day !== subEvent.day) {
+      const existingSubevent = await SubEvent.findOne({
+        where: { event_id: subEvent.event_id, day: day },
+      });
+      if (existingSubevent) {
+        return next(
+          new ApiError(
+            400,
+            `Sub event for day ${day} already exists for the event`
+          )
+        );
+      }
+    }
+    if (name && name !== subEvent.name) {
+      const existingEvent = await SubEvent.findOne({
+        where: { name: name, event_id: subEvent.event_id },
+      });
+      if (existingEvent) {
+        return next(
+          new ApiError(
+            400,
+            "Sub event with this name already exists for the event"
+          )
+        );
+      }
     }
 
-    // Update sub-event
-    await subEvent.update(updateData);
+    const previousImage = subEvent.images;
 
-    return res.status(200).json(
-      new ApiResponse(200, { subEvent }, "SubEvent updated successfully")
-    );
+    // Update sub-event
+    const updatedEvent = await subEvent.update({
+      name: name ?? subEvent.name,
+      date: date ?? subEvent.date,
+      start_time: start_time ?? subEvent.start_time,
+      end_time: end_time ?? subEvent.end_time,
+      day: day ?? subEvent.day,
+      quantity: quantity ?? subEvent.quantity,
+      description: description ?? subEvent.description,
+      images: imageUrl ? [imageUrl] : previousImage,
+    });
+
+    if (imageUrl) {
+      if (previousImage) {
+        await deletefromCloudinary(previousImage, "image");
+      }
+    }
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { subEvent: updatedEvent },
+          "SubEvent updated successfully"
+        )
+      );
   } catch (error) {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
-
- 
 
 export {
   createSubEvent,
@@ -209,5 +347,5 @@ export {
   getAllSubeventOfEvent,
   getSubEventById,
   filterSubEvents,
-  UpdatetheSubevent
+  UpdateSubevent,
 };
