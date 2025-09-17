@@ -36,29 +36,8 @@ const Transaction = sequelize.define(
       },
     },
     source_of_payment: {
-      type: DataTypes.ENUM(
-        "razorpay",
-        "paytm",
-        "phonepe",
-        "googlepay",
-        "cash",
-        "bank_transfer",
-        "other"
-      ),
+      type: DataTypes.STRING(100),
       allowNull: false,
-      validate: {
-        isIn: [
-          [
-            "razorpay",
-            "paytm",
-            "phonepe",
-            "googlepay",
-            "cash",
-            "bank_transfer",
-            "other",
-          ],
-        ],
-      },
     },
     status: {
       type: DataTypes.ENUM(
@@ -184,4 +163,4 @@ const Transaction = sequelize.define(
   }
 );
 
-export default Transaction;
+export default Transaction;

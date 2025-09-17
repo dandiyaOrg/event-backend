@@ -13,7 +13,7 @@ const Order = sequelize.define(
     },
     razorpay_order_id: {
       type: DataTypes.STRING(100),
-      allowNull: false,
+      allowNull: true,
       unique: true,
       validate: {
         notEmpty: true,
@@ -45,6 +45,7 @@ const Order = sequelize.define(
     total_amount: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
+      defaultValue: 0,
       validate: {
         min: 0,
         isDecimal: true,
@@ -83,4 +84,4 @@ const Order = sequelize.define(
   }
 );
 
-export default Order;
+export default Order;

@@ -11,6 +11,11 @@ const BillingUser = sequelize.define(
       allowNull: false,
       field: "billing_user_id",
     },
+    admin_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      field: "admin_id",
+    },
     name: {
       type: DataTypes.STRING(100),
       allowNull: false,
@@ -121,6 +126,9 @@ const BillingUser = sequelize.define(
       },
       {
         fields: ["email"],
+      },
+      {
+        fields: ["admin_id"],
       },
       {
         fields: ["mobile_no"],
