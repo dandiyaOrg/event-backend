@@ -201,8 +201,8 @@ const updateEvent = asyncHandler(async (req, res, next) => {
     } = req.body;
 
     let imageUrl;
-    if (req.file) {
-      const imagelocalPath = req.file?.path;
+    if (req.image) {
+      const imagelocalPath = req?.image;
       if (imagelocalPath) {
         try {
           const { success, data, error } =

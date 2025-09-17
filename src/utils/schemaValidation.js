@@ -210,7 +210,7 @@ const eventUpdateSchema = Joi.object({
   image: commonFields.image.optional(),
 }).min(1);
 
-const updateEventTypeSchema = Joi.object({
+const updateEventStatusSchema = Joi.object({
   status: commonFields.event_status.required(),
 });
 
@@ -245,7 +245,7 @@ export {
   employeeUpdateSchema,
   eventRegisterSchema,
   eventUpdateSchema,
-  updateEventTypeSchema,
+  updateEventStatusSchema,
   subEventSchema,
   updateSubEventSchema,
 };

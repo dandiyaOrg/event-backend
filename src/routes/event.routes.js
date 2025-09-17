@@ -13,7 +13,7 @@ import validateBody from "../middlewares/validateBody.middleware.js";
 import {
   eventRegisterSchema,
   eventUpdateSchema,
-  updateEventTypeSchema,
+  updateEventStatusSchema,
 } from "../utils/schemaValidation.js";
 
 const router = Router();
@@ -33,11 +33,11 @@ router
   .route("/:eventId")
   .delete(deleteEvent)
   .get(getEventDetailById)
-  .put(validateBody(eventUpdateSchema, upload.single("image")), updateEvent);
+  .put(upload.single("image"), validateBody(eventUpdateSchema), updateEvent);
 
 router
-  .route("/update-type/:eventId")
-  .patch(validateBody(updateEventTypeSchema), updateEventStatus);
+  .route("/update-status/:eventId")
+  .patch(validateBody(updateEventStatusSchema), updateEventStatus);
 // Get events by admin
 router.route("/all").get(getAllEventByAdmin);
 
