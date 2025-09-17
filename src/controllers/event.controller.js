@@ -44,7 +44,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       return next(new ApiError(400, "Event image is required"));
     }
 
-    const imagelocalPath = req.file?.path;
+    const imagelocalPath = req.image;
     let imageUrl;
     if (imagelocalPath) {
       try {
@@ -82,7 +82,6 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     if (!newEvent) {
       return next(new ApiError(400, "Failed to create event"));
     }
-
     const qrResult = await generateQRCodeAndUpload(newEvent.event_id);
 
     if (!qrResult.success) {
@@ -100,14 +99,9 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       return next(new ApiError(400, "Failed to create event"));
     }
     const admin = await Admin.findByPk(req.admin_id);
-    const {} = await sendMail(
-      admin.email,
-      "Event Created Successfully",
-      afterRegistrationSuccess
-    );
     const { emailData, error } = await sendMail(
       admin.email,
-      "Event Created Successfully",
+      "eventRegistration",
       {
         admin,
         event: updatedEvent,

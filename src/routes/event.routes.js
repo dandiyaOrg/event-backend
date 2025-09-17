@@ -23,8 +23,8 @@ router.use(verifyJWT);
 router
   .route("/register")
   .post(
-    validateBody(eventRegisterSchema),
     upload.single("image"),
+    validateBody(eventRegisterSchema),
     registerEvent
   );
 
