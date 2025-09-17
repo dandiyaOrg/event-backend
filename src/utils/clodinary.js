@@ -6,32 +6,9 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// const uploadOnCloudinary = async (buffer) => {
-//   return new Promise((resolve, reject) => {
-//     const stream = cloudinary.uploader.upload_stream(
-//       { folder: "dandiya-event", resource_type: "image" }, // Specify the folder name here
-//       (error, result) => {
-//         if (error) {
-//           reject(error);
-//         } else {
-//           resolve(result);
-//         }
-//       }
-//     );
-//     stream.end(buffer);
-//   });
-// };
-
 const uploadOnCloudinary = async (filePath) => {
-  return cloudinary.uploader.upload(filePath, {
-    folder: "dandiya-event",
-    resource_type: "image",
-  });
-};
-
-const uploadQRCodeToCloudinary = async (base64String) => {
   try {
-    const result = await cloudinary.uploader.upload(base64String, {
+    const result = await cloudinary.uploader.upload(filePath, {
       folder: "dandiya-event",
       resource_type: "image",
     });
@@ -59,7 +36,6 @@ const deletefromCloudinary = async (clodinaryfilePaths, resource_type) => {
     for (let x of clodinaryfilePaths) {
       paths.push(getimagepublicid(x));
     }
-    // const public_id = getimagepublicid(clodinaryfilePath);
     const result = await cloudinary.api.delete_resources(paths, {
       resource_type: resource_type || "image",
     });
@@ -70,4 +46,4 @@ const deletefromCloudinary = async (clodinaryfilePaths, resource_type) => {
   }
 };
 
-export { uploadOnCloudinary, deletefromCloudinary, uploadQRCodeToCloudinary };
+export { uploadOnCloudinary, deletefromCloudinary };

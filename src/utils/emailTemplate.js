@@ -239,6 +239,53 @@ const employeeCredentialsUpdateEmail = ({
   `;
 };
 
+const eventRegistrationEmail = ({
+  admin = {},
+  event = {},
+  title = "New Event Created Successfully",
+  time = new Date(),
+}) => {
+  return `
+  <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:40px;">
+    <div style="max-width:510px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:30px 24px;">
+      <div style="text-align:center;">
+        <img src="${event.event_image || "https://cdn-icons-png.flaticon.com/512/1670/1670347.png"}" alt="Event Image" style="width:60px;height:60px;margin-bottom:16px;border-radius:8px;object-fit:cover;" />
+        <h2 style="font-size:22px;font-weight:700;margin:0 0 12px 0;color:#212529;">
+          ${title}
+        </h2>
+        <p style="color:#6c757d;font-size:13px;margin:0 0 18px 0;">${time.toLocaleString()}</p>
+      </div>
+      <hr style="margin:16px 0;border-top:1px solid #e7e7e7;" />
+      <p style="font-size:15px;line-height:1.6;margin-bottom:15px;">
+        Dear <b>${admin.name || "Admin"}</b>,<br />
+        A new event has been created with the following details:
+      </p>
+      <ul style="list-style:none;padding:0;margin:0 0 15px 0;font-size:14px;color:#212529;">
+        <li><b>Event Name:</b> ${event.event_name || "-"}</li>
+        <li><b>Event Number:</b> ${event.event_number || "-"}</li>
+        <li><b>Type of Event:</b> ${event.type_of_event || "-"}</li>
+        <li><b>Status:</b> ${event.status || "-"}</li>
+        <li><b>Venue:</b> ${event.venue || "-"}</li>
+        <li><b>Start Date:</b> ${event.date_start || "-"}</li>
+        <li><b>End Date:</b> ${event.date_end || "-"}</li>
+        <li><b>Number of Days:</b> ${event.number_of_days || "-"}</li>
+        <li><b>Google Map Link:</b> <a href="${event.google_map_link || "#"}" target="_blank">View Map</a></li>
+        ${event.description ? `<li><b>Description:</b> ${event.description}</li>` : ""}
+        ${event.event_url ? `<li><b>Event URL:</b> <a href="${event.event_url}" target="_blank">${event.event_url}</a></li>` : ""}
+        ${event.event_qr ? `<li><b>QR Code:</b> <img src="${event.event_qr}" alt="QR Code" style="height:60px;vertical-align:middle;" /></li>` : ""}
+      </ul>
+      <hr style="margin:14px 0;border-top:1px solid #ececec;" />
+      <div style="font-size:12.5px;color:#444;margin-top:8px;">
+        Created by: <b>${admin.name || "Admin"}</b><br/>
+        ${admin.organization ? "Organization: " + admin.organization : ""}
+      </div>
+      <div style="color:#bbbbbb;font-size:11px;text-align:center;margin-top:20px;">
+        © ${new Date().getFullYear()} ${admin.organization || ""}
+      </div>
+    </div>
+  </div>
+  `;
+};
 export {
   adminOtpLoginEmail,
   emailVerfication,
@@ -246,4 +293,5 @@ export {
   afterRegistrationSuccess,
   employeeRegistrationEmail,
   employeeCredentialsUpdateEmail,
+  eventRegistrationEmail,
 };

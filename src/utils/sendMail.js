@@ -47,6 +47,15 @@ const emailTypeMap = {
         password,
       }),
   },
+  eventRegistration: {
+    from: appEmails.info,
+    subject: "Event Registration Successful",
+    template: ({ event, admin }) =>
+      emailTemplates.eventRegistrationEmail({
+        event,
+        admin,
+      }),
+  },
 };
 
 const sendMail = async (

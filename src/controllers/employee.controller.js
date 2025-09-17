@@ -75,7 +75,6 @@ const createEmployee = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    console.log("error in creating employee:", error);
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
