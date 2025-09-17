@@ -24,7 +24,7 @@ router.route("/getAllSubeventOfEvent").get(getAllSubeventOfEvent);
 router
   .route("/registersubevent")
   .post(validateBody(subEventSchema), upload.single("image"), createSubEvent);
-router.route(`/searchSubEvents?query=${query}`).get(filterSubEvents);
+
 router
   .route("/:subeventId")
   .get(getSubEventById)
