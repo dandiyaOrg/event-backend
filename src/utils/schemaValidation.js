@@ -99,6 +99,33 @@ export const commonFields = {
         "Event type must be one of conference, workshop, seminar, concert, exhibition, sports, festival, other",
       "any.required": "Event type is required",
     }),
+  category: Joi.string()
+    .valid(
+      "Group",
+      "Stag Male",
+      "Stag Female",
+      "Couple",
+      "Full Pass"
+    )
+    .required()
+    .message({
+      "string.base": "Category must be a text",
+      "string.empty": "Category is required.",
+      "any.only": "Category must be one of Group, Stag Male, Stag Female, Couple, Full Pass.",
+      "any.required": "Category is required."
+  }),
+
+  discount_percentage: Joi.number()
+    .precision(2)
+    .min(0)
+    .max(100)
+    .required()
+    .messages({
+      "number.base": "Discount percentage must be a number",
+      "number.min": "Discount percentage cannot be negative",
+      "number.max": "Discount percentage cannot exceed 100",
+  }),
+
   venue: Joi.string().min(5).max(255).required().messages({
     "string.base": "Venue must be a text",
     "string.empty": "Venue is required",
@@ -159,6 +186,12 @@ export const commonFields = {
     "number.base": "Amount must be a number",
     "number.min": "Amount cannot be negative",
     "any.required": "Amount is required",
+  }),
+  validity: Joi.number().integer().min(1).max(9).required().messages({
+    "number.base": "Validity must be a number",
+    "number.integer": "Validity must be an integer",
+    "number.min": "Validity must be at least {#limit} day(s)",
+    "number.max": "Validity cannot exceed {#limit} days",
   }),
 };
 
@@ -284,6 +317,27 @@ const createOrderSchema = Joi.object({
       "any.required": "Attendees are required",
     }),
 });
+
+const createPass = Joi.object({
+  pass_id: commonFields.idSchema,
+  category: commonFields.category,
+  total_price: commonFields.amount,
+  discount_percentage: commonFields.discount_percentage,
+  validity: commonFields.validity,
+  is_global: Joi.boolean().required(),
+  is_active: Joi.boolean().required(),
+})
+
+const updatePassvalidation = Joi.object({
+  category: commonFields.category.optional(),
+  total_amount: commonFields.amount.optional(),
+  discount_percentage: commonFields.discount_percentage.optional(),
+  validity: commonFields.validity.optional(),
+  is_global: Joi.boolean().optional(),
+  is_active: Joi.boolean().optional(),
+}).min(1);
+
+
 export {
   adminRegisterSchema,
   updatePasswordSchema,
@@ -297,6 +351,8 @@ export {
   updateSubEventSchema,
   createBillingUserSchema,
   createOrderSchema,
+  createPass,
+  updatePassvalidation
 };
 
 // TODO: need dynamic message for commonFields

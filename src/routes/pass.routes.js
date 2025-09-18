@@ -2,7 +2,7 @@ import { Router } from "express";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 
 import {
-  createPass,
+  createNewPass,
   deletePass,
   updatePass,
   getPassById,
@@ -10,19 +10,19 @@ import {
 } from "../controllers/pass.controller.js";
 
 import validateBody from "../middlewares/validateBody.middleware.js";
-import {} from "../utils/schemaValidation.js";
+import { createPass, updatePassvalidation } from "../utils/schemaValidation.js";
 
 const router = Router();
 
 router.use(verifyJWT);
 
-router.route("/create").post(validateBody(), createPass);
+router.route("/create").post(validateBody(createPass), createNewPass);
 
 router
   .route("/:passId")
-  .delete(deletePass)
-  .get(getPassById)
-  .put(validateBody(), updatePass);
+    .delete(deletePass)
+    .get(getPassById)
+    .put(validateBody(updatePassvalidation), updatePass);
 
 router.route("/subevent/:subeventId").get(getAllPassForSubevent);
 
