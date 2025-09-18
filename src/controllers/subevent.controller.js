@@ -5,7 +5,7 @@ import {
   uploadOnCloudinary,
   deletefromCloudinary,
 } from "../utils/clodinary.js";
-import { Event, SubEvent } from "../db/models/event.model.js";
+import { Event, SubEvent } from "../db/models/index.js";
 import { validate as isUUID } from "uuid";
 import { Op } from "sequelize";
 

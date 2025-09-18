@@ -3,7 +3,13 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import sendMail from "../utils/sendMail.js";
 import { Op } from "sequelize";
-import { Pass, BillingUser, SubEvent, Admin, Event } from "../db/models";
+import {
+  Pass,
+  BillingUser,
+  SubEvent,
+  Admin,
+  Event,
+} from "../db/models/index.js";
 import {
   uploadOnCloudinary,
   deletefromCloudinary,

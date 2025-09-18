@@ -10,7 +10,7 @@ import {
   Order,
   OrderItem,
   Attendee,
-} from "../db/models";
+} from "../db/models/index.js";
 
 import sendMail from "../utils/sendMail.js";
 
