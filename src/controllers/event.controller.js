@@ -52,7 +52,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     if (!req.file) {
       return next(new ApiError(400, "Event image is required"));
     }
-    const imagelocalPath = req.image;
+    const imagelocalPath = req.body.image;
     let imageUrl;
     if (imagelocalPath) {
       try {
