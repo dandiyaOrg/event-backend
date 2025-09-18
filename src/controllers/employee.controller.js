@@ -2,7 +2,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Op } from "sequelize";
-import { Employee, Admin } from "../db/models";
+import { Employee, Admin } from "../db/models/index.js";
 import { decryptPassword } from "../utils/encrypt.js";
 import sendMail from "../utils/sendMail.js";
 

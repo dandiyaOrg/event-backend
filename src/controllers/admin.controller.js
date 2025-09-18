@@ -1,7 +1,7 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { Admin } from "../db/models/";
+import { Admin } from "../db/models/index.js";
 import { Op } from "sequelize";
 import sendMail from "../utils/sendMail.js";
 
