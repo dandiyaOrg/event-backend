@@ -250,11 +250,11 @@ const getAllPassForSubevent = asyncHandler(async (req, res, next) => {
 
     const passes = passIds.length
       ? await Pass.findAll({
-          where: { pass_id: passIds },
+          where: { pass_id: passIds, is_global: false },
           attributes: [
             "pass_id",
             "category",
-            "total_price",
+            "total_price",  
             "discount_percentage",
             "final_price",
             "validity",
