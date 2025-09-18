@@ -2,10 +2,9 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Op } from "sequelize";
-import Employee from "../db/models/employee.model.js";
+import { Employee, Admin } from "../db/models";
 import { decryptPassword } from "../utils/encrypt.js";
 import sendMail from "../utils/sendMail.js";
-import Admin from "../db/models/admin.model.js";
 
 const createEmployee = asyncHandler(async (req, res, next) => {
   try {

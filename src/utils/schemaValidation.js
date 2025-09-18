@@ -141,6 +141,12 @@ export const commonFields = {
       "any.only": "Initiated, Active, Ready, Closed, Cancelled",
       "any.required": "Event status is required",
     }),
+  gender: Joi.string().valid("Male", "Female", "Other").required().messages({
+    "string.base": "Gender must be a text",
+    "string.empty": "Gender is required",
+    "any.only": "Male, Female, Other",
+    "any.required": "Gender is required",
+  }),
   idSchema: Joi.string().guid({ version: "uuidv4" }).required().messages({
     "string.guid": "Event ID must be a valid UUIDv4",
     "string.empty": "Event ID is required",
@@ -149,12 +155,17 @@ export const commonFields = {
   image: Joi.any().required().messages({
     "any.required": "Sub event image is required",
   }),
+  amount: Joi.number().precision(2).min(0).required().messages({
+    "number.base": "Amount must be a number",
+    "number.min": "Amount cannot be negative",
+    "any.required": "Amount is required",
+  }),
 };
 
 // admin registration schema
 const adminRegisterSchema = Joi.object({
   name: commonFields.name,
-  mobileNumber: commonFields.mobileNumber,
+  mobile_no: commonFields.mobileNumber,
   email: commonFields.email,
   address: commonFields.address,
   password: commonFields.password,
@@ -237,6 +248,42 @@ const updateSubEventSchema = Joi.object({
   image: commonFields.image.optional(),
 }).min(1);
 
+const createBillingUserSchema = Joi.object({
+  name: commonFields.name,
+  mobile_no: commonFields.mobileNumber,
+  whatsapp: commonFields.mobileNumber,
+  email: commonFields.email,
+  address: commonFields.address,
+  dob: commonFields.dateSchema,
+  gender: commonFields.gender,
+  event_id: commonFields.idSchema,
+});
+
+const attendeeSchema = Joi.object({
+  name: commonFields.name,
+  whatsapp: commonFields.mobileNumber,
+  email: commonFields.email,
+  dob: commonFields.dateSchema,
+  gender: commonFields.gender,
+  pass_id: commonFields.idSchema,
+});
+
+const createOrderSchema = Joi.object({
+  subevent_id: commonFields.idSchema,
+  billing_user_id: commonFields.idSchema,
+  total_amount: commonFields.amount,
+  attendees: Joi.array()
+    .items(attendeeSchema)
+    .min(1)
+    .max(5)
+    .required()
+    .messages({
+      "array.base": "Attendees must be an array",
+      "array.min": "At least one attendee is required",
+      "array.max": "Maximum five attendees allowed",
+      "any.required": "Attendees are required",
+    }),
+});
 export {
   adminRegisterSchema,
   updatePasswordSchema,
@@ -248,4 +295,31 @@ export {
   updateEventStatusSchema,
   subEventSchema,
   updateSubEventSchema,
+  createBillingUserSchema,
+  createOrderSchema,
 };
+
+// TODO: need dynamic message for commonFields
+// commonFields.js
+
+// export const amount = Joi.number()
+//   .precision(2)
+//   .min(0)
+//   .required()
+//   .label("Amount")
+//   .messages({
+//     "number.base": "{#label} must be a number",
+//     "number.min": "{#label} cannot be negative",
+//     "any.required": "{#label} is required",
+//   });
+
+// export const image = Joi.any()
+//   .required()
+//   .label("Image")
+//   .messages({
+//     "any.required": "{#label} is required",
+//   });
+// const schema = Joi.object({
+//   total_amount: amount.label("total_amount"),
+//   subevent_image: image.label("subevent_image"),
+// });

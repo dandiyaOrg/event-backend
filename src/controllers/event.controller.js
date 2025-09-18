@@ -1,9 +1,9 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import Admin from "../db/models/admin.model.js";
-import Event from "../db/models/event.model.js";
 import sendMail from "../utils/sendMail.js";
+import { Op } from "sequelize";
+import { Pass, BillingUser, SubEvent, Admin, Event } from "../db/models";
 import {
   uploadOnCloudinary,
   deletefromCloudinary,
@@ -302,6 +302,72 @@ const getAllEventByAdmin = asyncHandler(async (req, res, next) => {
   }
 });
 
+const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
+  try {
+    const { billingUserId } = req.body;
+    if (!billingUserId) {
+      return next(400, "Billing User Id is required");
+    }
+    const eventId = req.params.eventId;
+
+    const billingUser = await BillingUser.findByPk(billingUserId);
+    if (!billingUser) {
+      return next(
+        new ApiError(404, `Billing user with id ${billingUserId} not found`)
+      );
+    }
+
+    const event = await Event.findByPk(eventId);
+    if (!event) {
+      return next(new ApiError(404, `Event with id ${eventId} not found`));
+    }
+    const subevents = await SubEvent.findAll({
+      where: { event_id: eventId, is_active: true },
+      attributes: [
+        "subevent_id",
+        "name",
+        "description",
+        "date",
+        "start_time",
+        "end_time",
+        "day",
+        "available_quantity",
+      ],
+      include: [
+        {
+          model: Pass,
+          as: "passes",
+          where: { is_active: true },
+          required: false,
+          attributes: [
+            "pass_id",
+            "category",
+            "total_price",
+            "discount_percentage",
+            "validity",
+            "final_price",
+          ],
+        },
+      ],
+      order: [
+        ["date", "ASC"],
+        ["start_time", "ASC"],
+      ],
+    });
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          subevents,
+          `Subevents fetched successfully for event ${eventId}`
+        )
+      );
+  } catch (error) {
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
 export {
   registerEvent,
   deleteEvent,
@@ -309,4 +375,5 @@ export {
   updateEvent,
   getAllEventByAdmin,
   updateEventStatus,
+  getAllSubeventsWithPasses,
 };

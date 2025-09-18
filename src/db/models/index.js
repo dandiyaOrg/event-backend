@@ -326,6 +326,8 @@ export {
   IssuedPass,
   CheckingRecord,
   defineAssociations,
+  PassSubEvent,
+  EventBillingUsers,
 };
 
 // Function to sync all models

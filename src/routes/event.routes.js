@@ -8,6 +8,7 @@ import {
   updateEvent,
   getAllEventByAdmin,
   updateEventStatus,
+  getAllSubeventsWithPasses,
 } from "../controllers/event.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -17,6 +18,8 @@ import {
 } from "../utils/schemaValidation.js";
 
 const router = Router();
+
+router.route("/:eventId/subevents").post(getAllSubeventsWithPasses);
 
 router.use(verifyJWT);
 
