@@ -1,29 +1,18 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import Admin from "../db/models/admin.model.js";
+import { Admin } from "../db/models/";
 import { Op } from "sequelize";
 import sendMail from "../utils/sendMail.js";
 
 const registerAdmin = asyncHandler(async (req, res, next) => {
   try {
-    const { name, mobileNumber, email, address, password, organization } =
+    const { name, mobile_no, email, address, password, organization } =
       req.body;
-
-    if (
-      !(name && mobileNumber && email && password && address && organization)
-    ) {
-      return next(
-        new ApiError(
-          400,
-          "Name, mobile number, email, and password fields are required"
-        )
-      );
-    }
 
     const existingAdmin = await Admin.findOne({
       where: {
-        [Op.or]: [{ email }, { mobile_no: mobileNumber }],
+        [Op.or]: [{ email }, { mobile_no }],
       },
     });
     if (existingAdmin) {
@@ -36,7 +25,7 @@ const registerAdmin = asyncHandler(async (req, res, next) => {
 
     const newAdmin = await Admin.create({
       name,
-      mobile_no: mobileNumber,
+      mobile_no,
       email,
       address,
       password,

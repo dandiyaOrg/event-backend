@@ -1,4 +1,4 @@
-import Pass from "../db/models/pass.model.js";
+import { Pass } from "../db/models";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
