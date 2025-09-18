@@ -30,7 +30,8 @@ router
     validateBody(eventRegisterSchema),
     registerEvent
   );
-
+// Get events by admin
+router.route("/all").get(getAllEventByAdmin);  
 // CRUD operations by ID (generic)
 router
   .route("/:eventId")
@@ -41,7 +42,5 @@ router
 router
   .route("/:eventId/status")
   .patch(validateBody(updateEventStatusSchema), updateEventStatus);
-// Get events by admin
-router.route("/all").get(getAllEventByAdmin);
 
 export default router;
