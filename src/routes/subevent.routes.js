@@ -8,7 +8,6 @@ import {
   deleteSubEvent,
   getAllSubeventOfEvent,
   getSubEventById,
-  filterSubEvents,
 } from "../controllers/subevent.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -20,15 +19,19 @@ const router = Router();
 
 router.use(verifyJWT);
 
-router.route("/getAllSubeventOfEvent").get(getAllSubeventOfEvent);
+router.route("/event/:eventId").get(getAllSubeventOfEvent);
 router
-  .route("/registersubevent")
-  .post(validateBody(subEventSchema), upload.single("image"), createSubEvent);
+  .route("/register")
+  .post(upload.single("image"), validateBody(subEventSchema), createSubEvent);
 
 router
   .route("/:subeventId")
   .get(getSubEventById)
-  .put(validateBody(updateSubEventSchema), UpdateSubevent)
+  .put(
+    upload.single("image"),
+    validateBody(updateSubEventSchema),
+    UpdateSubevent
+  )
   .delete(deleteSubEvent);
 
 export default router;

@@ -36,7 +36,7 @@ router
   .put(upload.single("image"), validateBody(eventUpdateSchema), updateEvent);
 
 router
-  .route("/update-status/:eventId")
+  .route("/:eventId/status")
   .patch(validateBody(updateEventStatusSchema), updateEventStatus);
 // Get events by admin
 router.route("/all").get(getAllEventByAdmin);

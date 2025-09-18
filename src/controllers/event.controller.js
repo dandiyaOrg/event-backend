@@ -4,7 +4,10 @@ import { ApiError } from "../utils/ApiError.js";
 import Admin from "../db/models/admin.model.js";
 import Event from "../db/models/event.model.js";
 import sendMail from "../utils/sendMail.js";
-import { uploadOnCloudinary } from "../utils/clodinary.js";
+import {
+  uploadOnCloudinary,
+  deletefromCloudinary,
+} from "../utils/clodinary.js";
 import { generateQRCodeAndUpload } from "../services/qrGenerator.service.js";
 
 const registerEvent = asyncHandler(async (req, res, next) => {
@@ -43,7 +46,6 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     if (!req.file) {
       return next(new ApiError(400, "Event image is required"));
     }
-
     const imagelocalPath = req.image;
     let imageUrl;
     if (imagelocalPath) {

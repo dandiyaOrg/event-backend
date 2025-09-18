@@ -23,20 +23,6 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
       description,
     } = req.body;
 
-    if (
-      !(name && event_id && date && start_time && end_time && day && quantity)
-    ) {
-      return next(
-        new ApiError(
-          400,
-          "SubEvent name, event_id, admin_id, date, start_time, end_time, quantity and day are required fields"
-        )
-      );
-    }
-
-    if (!req.file) {
-      return next(new ApiError(400, "Sub event image is required"));
-    }
     const event = await Event.findByPk(event_id);
     if (!event) {
       return next(new ApiError(404, `Event with id ${event_id} not found`));
@@ -75,8 +61,7 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
       );
     }
 
-    const imagelocalPath = req.file?.path;
-
+    const imagelocalPath = req.image;
     let imageUrl;
     if (imagelocalPath) {
       try {
@@ -155,19 +140,19 @@ const deleteSubEvent = asyncHandler(async (req, res, next) => {
 
 const getAllSubeventOfEvent = asyncHandler(async (req, res, next) => {
   try {
-    const { event_id } = req.body;
+    const { eventId } = req.params;
 
-    if (!event_id) {
+    if (!eventId) {
       return next(new ApiError(400, "Event id is required"));
     }
 
     const subEvents = await SubEvent.findAll({
-      where: { event_id: event_id },
+      where: { event_id: eventId },
     });
 
     if (!subEvents || subEvents.length === 0) {
       return next(
-        new ApiError(404, `No subevents found for event id ${event_id}`)
+        new ApiError(404, `No subevents found for event id ${eventId}`)
       );
     }
 
@@ -202,37 +187,6 @@ const getSubEventById = asyncHandler(async (req, res, next) => {
       .json(new ApiResponse(200, subEvent, "SubEvent fetched successfully"));
   } catch (error) {
     return next(new ApiError(500, "Internal Server Error", error));
-  }
-});
-
-const filterSubEvents = asyncHandler(async (req, res, next) => {
-  try {
-    const { eventId } = req.body;
-    const { query } = req.query;
-
-    if (!query) {
-      return next(new ApiError(400, "Search query is required"));
-    }
-
-    if (!eventId || !isUUID(eventId)) {
-      return next(new ApiError(400, "Valid Event ID is required"));
-    }
-
-    const data = await SubEvent.findAll({
-      where: {
-        event_id: eventId,
-        name: {
-          [Op.iLike]: `%${query}%`,
-        },
-      },
-    });
-
-    return res
-      .status(200)
-      .json(new ApiResponse(200, data, "Events fetched successfully"));
-  } catch (error) {
-    console.error(error);
-    next(new ApiError(500, "Internal Server Error", error.message));
   }
 });
 
@@ -346,6 +300,5 @@ export {
   deleteSubEvent,
   getAllSubeventOfEvent,
   getSubEventById,
-  filterSubEvents,
   UpdateSubevent,
 };
