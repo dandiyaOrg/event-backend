@@ -20,8 +20,8 @@ import {
 
 const router = Router();
 
-router.route("/subevents/:eventId").post(getAllSubeventsWithPasses);
-router.route("/global/:eventId").post(getGlobalPassForEvent);
+router.route("/details/subevents").post(getAllSubeventsWithPasses);
+router.route("/details/global").post(getGlobalPassForEvent);
 
 router.use(verifyJWT);
 

@@ -341,7 +341,6 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         where: {
           whatsapp: normalizedWhatsapp,
           email: normalizedEmail,
-          subevent_id,
         },
         transaction: t,
       });
@@ -352,11 +351,22 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
             ...attendeeData,
             email: normalizedEmail,
             whatsapp: normalizedWhatsapp,
-            subevent_id,
           },
           { transaction: t }
         );
       }
+      // Link attendee to the subevent in SubEventAttendee junction table
+      await SubEventAttendee.findOrCreate({
+        where: {
+          subevent_id,
+          attendee_id: attendee.attendee_id,
+        },
+        defaults: {
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        transaction: t,
+      });
 
       // 7. Link each attendee to appropriate OrderItem via pass_id
       const orderItem = orderItemsMap.get(attendeeData.pass_id);

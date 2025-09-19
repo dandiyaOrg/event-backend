@@ -7,11 +7,13 @@ import {
   deleteEmployee,
   toggleEmployeeStatus,
   loginEmployee,
+  scanIssuedPass,
 } from "../controllers/employee.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
   employeeRegisterSchema,
   employeeUpdateSchema,
+  scanPassSchema,
 } from "../utils/schemaValidation.js";
 const router = Router();
 
@@ -23,7 +25,7 @@ router
 
 router.route("/login").post(loginEmployee);
 router.route("/toggleStatus/:employeeId").post(verifyJWT, toggleEmployeeStatus);
-
+router.route("/scanpass", validateBody(scanPassSchema), scanIssuedPass);
 router
   .route("/:employeeId")
   .put(validateBody(employeeUpdateSchema), verifyJWT, updateEmployee)

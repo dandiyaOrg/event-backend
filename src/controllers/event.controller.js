@@ -311,12 +311,11 @@ const getAllEventByAdmin = asyncHandler(async (req, res, next) => {
 
 const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
   try {
-    const { billingUserId } = req.body;
+    const { billingUserId, eventId } = req.body;
     if (!billingUserId) {
       return next(400, "Billing User Id is required");
     }
-    const eventId = req.params.eventId;
-
+    // Validate billing user exists
     const billingUser = await BillingUser.findByPk(billingUserId);
     if (!billingUser) {
       return next(
@@ -324,12 +323,31 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
       );
     }
 
+    // Validate event exists
     const event = await Event.findByPk(eventId);
     if (!event) {
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
+
+    // Optional: Check if billing user has access to this event
+    // You might want to add this validation based on your business logic
+    const hasAccess = await EventBillingUsers.findOne({
+      where: {
+        event_id: eventId,
+        billing_user_id: billingUserId,
+      },
+    });
+
+    if (!hasAccess) {
+      return next(new ApiError(403, "You don't have access to this event"));
+    }
+
+    // Get subevents with their associated passes
     const subevents = await SubEvent.findAll({
-      where: { event_id: eventId, is_active: true },
+      where: {
+        event_id: eventId,
+        is_active: true,
+      },
       attributes: [
         "subevent_id",
         "name",
@@ -343,9 +361,9 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
       include: [
         {
           model: Pass,
-          as: "passes",
+          as: "passes", // ← Make sure this matches your association alias
           where: { is_active: true },
-          required: false,
+          required: false, // LEFT JOIN - includes subevents even without passes
           attributes: [
             "pass_id",
             "category",
@@ -361,13 +379,19 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
         ["start_time", "ASC"],
       ],
     });
+
+    // Convert to plain objects for better JSON response
+    const subeventData = subevents.map((subevent) =>
+      subevent.get({ plain: true })
+    );
+
     return res
       .status(200)
       .json(
         new ApiResponse(
           200,
-          subevents,
-          `Subevents fetched successfully for event ${eventId}`
+          subeventData,
+          `Subevents with passes fetched successfully for event ${eventId}`
         )
       );
   } catch (error) {
@@ -377,11 +401,10 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
 
 const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
   try {
-    const { billingUserId } = req.body;
+    const { billingUserId, eventId } = req.body;
     if (!billingUserId) {
       return next(400, "Billing User Id is required");
     }
-    const { eventId } = req.params;
     if (!eventId) {
       return next(new ApiError(400, "Event ID is required in query params"));
     }
@@ -389,52 +412,81 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
     if (!event) {
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
+
+    // 2. Get subevents for this event
     const subevents = await SubEvent.findAll({
       where: { event_id: eventId },
       attributes: ["subevent_id"],
     });
+
     const subeventIds = subevents.map((s) => s.subevent_id);
     if (subeventIds.length === 0) {
       return next(new ApiError(404, "No subevents found for this event"));
     }
 
-    // 3. Find all distinct pass_ids linked to those subevents
-    const passIdRows = await PassSubEvent.findAll({
+    // 3. Find global passes linked to any subevent of this event
+    // Using the is_global field and checking if pass is linked to this event's subevents
+    const globalPasses = await PassSubEvent.findAll({
       where: {
         subevent_id: { [Op.in]: subeventIds },
       },
+      include: [
+        {
+          model: Pass,
+          as: "pass", // Use the alias from associations
+          where: {
+            is_global: true,
+            is_active: true, // Only get active passes
+          },
+          required: true,
+        },
+      ],
       attributes: ["pass_id"],
-      group: ["pass_id"],
+      group: ["pass_id", "pass.pass_id"], // Group by pass to avoid duplicates
     });
-    const candidatePassIds = passIdRows.map((row) => row.pass_id);
-    if (candidatePassIds.length === 0) {
-      return next(new ApiError(404, "No passes linked to event subevents"));
+
+    if (globalPasses.length === 0) {
+      return next(
+        new ApiError(404, "No active global pass found for this event")
+      );
     }
-    let globalPassId = null;
-    for (const passId of candidatePassIds) {
-      const count = await PassSubEvent.count({
-        where: { pass_id: passId },
+
+    // 4. For each global pass, verify it's linked to ALL subevents of this event
+    let validGlobalPass = null;
+
+    for (const passSubEvent of globalPasses) {
+      const passId = passSubEvent.pass_id;
+
+      // Count how many subevents this pass is linked to
+      const linkedSubeventsCount = await PassSubEvent.count({
+        where: {
+          pass_id: passId,
+          subevent_id: { [Op.in]: subeventIds },
+        },
       });
 
-      if (count === event.number_of_days) {
-        globalPassId = passId;
+      // If this pass is linked to all subevents of the event, it's a valid global pass
+      if (linkedSubeventsCount === subeventIds.length) {
+        validGlobalPass = passSubEvent.pass;
         break;
       }
     }
-    if (!globalPassId) {
-      return next(new ApiError(404, "Global pass not found for this event"));
-    }
-    const globalPass = await Pass.findByPk(globalPassId);
 
-    if (!globalPass) {
-      return next(new ApiError(404, "Global pass details not found"));
+    if (!validGlobalPass) {
+      return next(
+        new ApiError(404, "No complete global pass found for this event")
+      );
     }
+
+    // 5. Return the global pass details
+    const passData = validGlobalPass.get({ plain: true });
+
     return res
       .status(200)
       .json(
         new ApiResponse(
           200,
-          { pass: { ...globalPass } },
+          { pass: passData },
           "Global pass fetched successfully"
         )
       );

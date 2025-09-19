@@ -59,12 +59,11 @@ startServer();
 // Todos:
 // 1. Error stack trace in all the responses
 // return next(new ApiError(500, "Failed to create order", [{ message: error.message, stack: error.stack }], error.stack));
-
 // 2. for a single event no need to create more than one global pass
-
 // 3. Transaction schema changes:
 // method_of_payment
 // source
-// 4. Create order for global bass from the billing User
-// 6. pass controller getAll function
-//  need to check createBillingUser for subEventAttendee entry
+
+// 4. Create order for global pass from the billing User
+// 5. pass controller getAll function
+// 6. qr function to generate qr with the given information

@@ -435,6 +435,12 @@ const updatePassvalidation = Joi.object({
   discount_percentage: commonFields.discount_percentage,
 });
 
+const scanPassSchema = Joi.object({
+  employee_id: commonFields.idSchema.label("Employee Id"),
+  subevent_id: commonFields.idSchema.label("SubEvent Id"),
+  attendee_id: commonFields.idSchema.label("Attendee Id"),
+});
+
 export {
   adminRegisterSchema,
   updatePasswordSchema,
@@ -451,4 +457,5 @@ export {
   createPass,
   updatePassvalidation,
   createGlobalPassOrderSchema,
+  scanPassSchema,
 };

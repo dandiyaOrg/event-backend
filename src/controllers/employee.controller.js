@@ -2,7 +2,15 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Op } from "sequelize";
-import { Employee, Admin } from "../db/models/index.js";
+import {
+  Employee,
+  Admin,
+  SubEvent,
+  CheckingRecord,
+  Attendee,
+  IssuedPass,
+  Pass,
+} from "../db/models/index.js";
 import { decryptPassword } from "../utils/encrypt.js";
 import sendMail from "../utils/sendMail.js";
 
@@ -342,6 +350,105 @@ const toggleEmployeeStatus = asyncHandler(async (req, res, next) => {
   }
 });
 
+const scanIssuedPass = asyncHandler(async (req, res, next) => {
+  try {
+    const { employee_id, subevent_id, attendee_id } = req.body;
+
+    // Validate subevent existence and date (must be today)
+    const subevent = await SubEvent.findByPk(subevent_id);
+    if (!subevent) {
+      return next(new ApiError(404, `SubEvent ${subevent_id} not found`));
+    }
+
+    // Check if subevent date is today (based on subevent.date)
+    const today = new Date();
+    const subeventDate = new Date(subevent.date);
+    if (
+      subeventDate.getFullYear() !== today.getFullYear() ||
+      subeventDate.getMonth() !== today.getMonth() ||
+      subeventDate.getDate() !== today.getDate()
+    ) {
+      return next(new ApiError(400, "The subevent is not scheduled for today"));
+    }
+
+    // Verify employee exists
+    const employee = await Employee.findByPk(employee_id);
+    if (!employee) {
+      return next(
+        new ApiError(404, `Employee with id ${employee_id} not found`)
+      );
+    }
+    if (!employee.is_active) {
+      return next(
+        new ApiError(
+          403,
+          `Employee with id ${employee_id} is inactive and cannot perform this action`
+        )
+      );
+    }
+
+    // Find issued pass for this attendee and subevent where status is active and not expired
+    const issuedPass = await IssuedPass.findOne({
+      where: {
+        attendee_id,
+        subevent_id,
+        status: "active",
+        is_expired: false,
+      },
+    });
+
+    if (!issuedPass) {
+      return next(
+        new ApiError(
+          404,
+          "Valid issued pass not found for attendee and subevent"
+        )
+      );
+    }
+
+    if (
+      issuedPass.is_expired ||
+      !["active", "used"].includes(issuedPass.status)
+    ) {
+      return next(new ApiError(400, "Issued pass is not valid for scanning"));
+    }
+    // Check if issued pass is already checked-in for today (optional, depending on requirements)
+    const existingCheck = await CheckingRecord.findOne({
+      where: {
+        issued_pass_id: issuedPass.issued_pass_id,
+        created_at: {
+          [Op.gte]: new Date(today.setHours(0, 0, 0, 0)), // start of today
+          [Op.lte]: new Date(today.setHours(23, 59, 59, 999)), // end of today
+        },
+      },
+    });
+
+    if (existingCheck) {
+      return next(new ApiError(400, "Pass already scanned for today"));
+    }
+
+    // Update issued pass used_count
+    issuedPass.used_count = (issuedPass.used_count || 0) + 1;
+    await issuedPass.save();
+
+    // Create new check-in record
+    await CheckingRecord.create({
+      issued_pass_id: issuedPass.issued_pass_id,
+      employee_id,
+      checkin_time: new Date(),
+    });
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, { employee }, "Attendee Pass Scanned Successfully")
+      );
+  } catch (error) {
+    console.error("Error in toggleEmployeeStatus:", error);
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
 export {
   createEmployee,
   updateEmployee,
@@ -349,4 +456,5 @@ export {
   deleteEmployee,
   toggleEmployeeStatus,
   loginEmployee,
+  scanIssuedPass,
 };

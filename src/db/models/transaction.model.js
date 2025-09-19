@@ -37,7 +37,7 @@ const Transaction = sequelize.define(
     },
     source_of_payment: {
       type: DataTypes.STRING(100),
-      allowNull: false,
+      allowNull: true,
     },
     status: {
       type: DataTypes.ENUM(
@@ -63,7 +63,7 @@ const Transaction = sequelize.define(
         "cash",
         "other"
       ),
-      allowNull: false,
+      allowNull: true,
       validate: {
         isIn: [["card", "netbanking", "upi", "wallet", "emi", "cash", "other"]],
       },
@@ -163,4 +163,4 @@ const Transaction = sequelize.define(
   }
 );
 
-export default Transaction;
+export default Transaction;
