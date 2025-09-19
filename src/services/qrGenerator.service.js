@@ -38,4 +38,35 @@ async function generateQRCodeAndUpload(eventId) {
   }
 }
 
-export { generateQRCodeAndUpload };
+async function generateQR(params = {}) {
+  try {
+    // Build payload (stringify or any format you prefer)
+    const qrPayload = JSON.stringify(params);
+
+    // Generate QR code options
+    const qrOptions = {
+      type: "image/png",
+      width: 250, // pixel size of the QR code image (adjustable)
+      margin: 2,
+      color: {
+        dark: "#000000", // QR code black color
+        light: "#ffffff", // Background color white
+      },
+      errorCorrectionLevel: "H", // High error correction (~30% damage)
+    };
+
+    // Generate Data URL (base64 PNG image)
+    const qrImageDataUrl = await QRCode.toDataURL(qrPayload, qrOptions);
+
+    return {
+      success: true,
+      data: qrPayload,
+      image: qrImageDataUrl,
+    };
+  } catch (error) {
+    console.error("Error generating QR code:", error);
+    return { success: false, error: error };
+  }
+}
+
+export { generateQRCodeAndUpload, generateQR };

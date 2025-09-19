@@ -84,12 +84,14 @@ import eventRoutes from "./routes/event.routes.js";
 import employeeRoutes from "./routes/emp.routes.js";
 import subeventRoutes from "./routes/subevent.routes.js";
 import passRoutes from "./routes/pass.routes.js";
+import billingUserRoutes from "./routes/billingUser.routes.js";
+
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/event", eventRoutes);
 app.use("/api/v1/employee", employeeRoutes);
 app.use("/api/v1/subevent", subeventRoutes);
 app.use("/api/v1/pass", passRoutes);
-
+app.use("/api/v1/billingUser", billingUserRoutes);
 app.get("/", async (req, res, next) => {
   res.send("hello from server");
 });

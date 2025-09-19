@@ -17,6 +17,7 @@ import {
 } from "../db/models/index.js";
 
 import sendMail from "../utils/sendMail.js";
+import { generateQR } from "../services/qrGenerator.service.js";
 
 const createBillingUser = asyncHandler(async (req, res, next) => {
   try {
@@ -527,8 +528,12 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               orderId: order_id,
             });
 
-            if (!qrData || !qrData.data || !qrData.image) {
-              throw new ApiError(500, "Failed to generate QR code");
+            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              throw new ApiError(
+                500,
+                "Failed to generate QR code",
+                qrData?.error
+              );
             }
             const issuedPass = await IssuedPass.create({
               pass_id,
@@ -550,7 +555,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
 
             await sendMail(attendee.email, "issuedPass", {
               attendee,
-              qrImage: qrData.image,
+              qrImage: qrData?.image,
               passCategory: item.pass.category,
               orderNumber: order_id,
               subeventName: mainSubEvent.name,
@@ -686,8 +691,12 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               subeventId: subevent.subevent_id,
             });
 
-            if (!qrData || !qrData.data || !qrData.image) {
-              throw new ApiError(500, "Failed to generate QR code");
+            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              throw new ApiError(
+                500,
+                "Failed to generate QR code",
+                qrData?.error
+              );
             }
 
             const issuedPass = await IssuedPass.create({
@@ -711,7 +720,7 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
             return {
               subeventName: subevent.name,
               expiryDate,
-              qrImage: qrData.image,
+              qrImage: qrData?.image,
             };
           })
         );

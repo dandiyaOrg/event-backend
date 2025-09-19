@@ -38,7 +38,33 @@ const createNewPass = asyncHandler(async (req, res, next) => {
           )
         );
       }
+      const existingGlobalPass = await Pass.findOne({
+        where: {
+          is_global: true,
+          is_active: true,
+        },
+        include: [
+          {
+            model: PassSubEvent,
+            as: "passSubEvents",
+            where: {
+              subevent_id: {
+                [Op.in]: subevents.map((se) => se.subevent_id),
+              },
+            },
+            required: true,
+          },
+        ],
+      });
 
+      if (existingGlobalPass) {
+        return next(
+          new ApiError(
+            400,
+            "A global pass already exists for this event. Cannot create duplicate."
+          )
+        );
+      }
       const passValidity = validity ?? event.number_of_days ?? 1;
       const pass = await Pass.create({
         category: "Group",
