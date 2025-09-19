@@ -3,15 +3,6 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { Pass, SubEvent, PassSubEvent } from "../db/models/index.js";
 
-// Allowed categories
-const ALLOWED_CATEGORIES = [
-  "Group",
-  "Stag Male",
-  "Stag Female",
-  "Couple",
-  "Full Pass",
-];
-
 const createNewPass = asyncHandler(async (req, res, next) => {
   try {
     const {
@@ -24,16 +15,19 @@ const createNewPass = asyncHandler(async (req, res, next) => {
       is_global,
       is_active,
     } = req.body;
-    if (is_global) {
+
+    if (is_global && is_global === true) {
       if (!event_id) {
         return next(
           new ApiError(400, "event_id is required when is_global is true")
         );
       }
+
       const event = await Event.findByPk(event_id);
       if (!event) {
         return next(new ApiError(400, `Event with id ${event_id} not found`));
       }
+
       const subevents = await SubEvent.findAll({ where: { event_id } });
 
       if (subevents.length < event.number_of_days) {
@@ -44,6 +38,7 @@ const createNewPass = asyncHandler(async (req, res, next) => {
           )
         );
       }
+
       const passValidity = validity ?? event.number_of_days ?? 1;
       const pass = await Pass.create({
         category: "Group",
@@ -53,6 +48,7 @@ const createNewPass = asyncHandler(async (req, res, next) => {
         is_active: is_active ?? false,
         is_global: true,
       });
+
       const passSubEventEntries = subevents.map((subev) => ({
         pass_id: pass.pass_id,
         subevent_id: subev.subevent_id,
@@ -61,6 +57,7 @@ const createNewPass = asyncHandler(async (req, res, next) => {
       await PassSubEvent.bulkCreate(passSubEventEntries, {
         ignoreDuplicates: true,
       });
+
       const data = pass.get({ plain: true });
       return res
         .status(200)
@@ -78,6 +75,7 @@ const createNewPass = asyncHandler(async (req, res, next) => {
           new ApiError(400, "subevent_id is required when is_global is false")
         );
       }
+
       const subEvent = await SubEvent.findByPk(subevent_id);
       if (!subEvent) {
         return next(
@@ -89,11 +87,13 @@ const createNewPass = asyncHandler(async (req, res, next) => {
       }
 
       // Check duplicate pass category for this subevent
+      // FIXED: Added the 'as' keyword to specify the alias
       const existingPass = await PassSubEvent.findOne({
         where: { subevent_id },
         include: [
           {
             model: Pass,
+            as: "pass", // ← This is the fix! Use the alias defined in associations
             where: { category },
             required: true,
           },
@@ -266,14 +266,13 @@ const getAllPassForSubevent = asyncHandler(async (req, res, next) => {
     if (!subeventId) {
       return next(new ApiError(400, "SubEvent ID is required"));
     }
-
     const passSubEvents = await PassSubEvent.findAll({
       where: { subevent_id: subeventId },
       attributes: ["pass_id"],
+      raw: true, // optional: returns plain objects instead of model instances
     });
 
-    const passIds = passSubEvents.map((pse) => pse?.pass_id);
-
+    const passIds = passSubEvents.map((pse) => pse.pass_id);
     const passes = passIds.length
       ? await Pass.findAll({
           where: { pass_id: passIds, is_global: false },

@@ -6,8 +6,10 @@ import {
   Event,
   PassSubEvent,
   SubEvent,
+  Pass,
   Order,
   OrderItem,
+  SubEventAttendee,
   OrderItemAttendee,
   Attendee,
   Transaction,
@@ -62,6 +64,166 @@ const createBillingUser = asyncHandler(async (req, res, next) => {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
+
+const createGlobalPassOrderForBillingUser = asyncHandler(
+  async (req, res, next) => {
+    const { event_id, billing_user_id, total_amount, attendees, pass_id } =
+      req.body;
+
+    const t = await sequelize.transaction();
+
+    try {
+      // 1. Validate event existence and status
+      const event = await Event.findOne({
+        where: { event_id, is_active: true },
+        transaction: t,
+      });
+      if (!event) {
+        await t.rollback();
+        return next(new ApiError(404, "Event not found or inactive"));
+      }
+
+      // 2. Validate global pass existence and active status
+      // Option 1: Use the pass_id provided in body (recommended)
+      const pass = await Pass.findOne({
+        where: { pass_id, is_active: true, is_global: true, event_id },
+        transaction: t,
+      });
+      if (!pass) {
+        await t.rollback();
+        return next(
+          new ApiError(400, "Invalid or inactive global pass for this event")
+        );
+      }
+
+      // Calculate total price for global pass * attendees count
+      const calculatedTotal = parseFloat(pass.final_price) * attendees.length;
+      if (parseFloat(total_amount).toFixed(2) !== calculatedTotal.toFixed(2)) {
+        await t.rollback();
+        return next(
+          new ApiError(
+            400,
+            "Total amount does not match the sum of pass prices"
+          )
+        );
+      }
+
+      // 4. Create Order
+      const order = await Order.create(
+        {
+          billing_user_id,
+          event_id,
+          admin_id: event.admin_id,
+          total_amount: calculatedTotal,
+        },
+        { transaction: t }
+      );
+
+      // 5. Create single OrderItem for the global pass
+      const orderItem = await OrderItem.create(
+        {
+          order_id: order.order_id,
+          pass_id,
+          quantity: attendees.length,
+          unit_price: parseFloat(pass.final_price),
+          total_price: calculatedTotal,
+        },
+        { transaction: t }
+      );
+
+      // 6. For each attendee:
+      // - Check if an issued pass already exists (via issuedpass model by attendee_id and pass_id)
+      // - Create attendee if not exists (by unique keys)
+      // - Create OrderItemAttendee link
+      // - Issue pass if not already issued
+      const eventSubevents = await SubEvent.findAll({
+        where: { event_id },
+        attributes: ["subevent_id"],
+        transaction: t,
+      });
+      const totalSubeventCount = eventSubevents.length;
+      const eventSubeventIds = eventSubevents.map((s) => s.subevent_id);
+      for (const attendeeData of attendees) {
+        // Normalize email and whatsapp
+        const normalizedEmail = attendeeData.email.toLowerCase().trim();
+        const normalizedWhatsapp = attendeeData.whatsapp
+          ? attendeeData.whatsapp.trim()
+          : null;
+
+        let attendee = await Attendee.findOne({
+          where: {
+            whatsapp: normalizedWhatsapp,
+            email: normalizedEmail,
+          },
+          transaction: t,
+        });
+
+        if (!attendee) {
+          attendee = await Attendee.create(
+            {
+              ...attendeeData,
+              email: normalizedEmail,
+              whatsapp: normalizedWhatsapp,
+            },
+            { transaction: t }
+          );
+        }
+        const linkedSubeventCount = await SubEventAttendee.count({
+          where: {
+            attendee_id: attendee.attendee_id,
+            subevent_id: { [Op.in]: eventSubeventIds },
+          },
+          transaction: t,
+        });
+        if (linkedSubeventCount === totalSubeventCount) {
+          await t.rollback();
+          return next(
+            new ApiError(
+              400,
+              `Attendee with email ${normalizedEmail} already assigned a global pass for this event`
+            )
+          );
+        }
+        // Check for existing issued pass
+        await OrderItemAttendee.create(
+          {
+            order_item_id: orderItem.order_item_id,
+            attendee_id: attendee.attendee_id,
+            assigned_date: new Date(),
+          },
+          { transaction: t }
+        );
+
+        // Link attendee to order item
+        await OrderItemAttendee.create(
+          {
+            order_item_id: orderItem.order_item_id,
+            attendee_id: attendee.attendee_id,
+            assigned_date: new Date(),
+          },
+          { transaction: t }
+        );
+      }
+
+      await t.commit();
+
+      return res
+        .status(201)
+        .json(
+          new ApiResponse(
+            201,
+            { order },
+            "Global pass order created successfully"
+          )
+        );
+    } catch (error) {
+      await t.rollback();
+      return next(
+        new ApiError(500, "Failed to create global pass order", error)
+      );
+    }
+  }
+);
 
 const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
   const { subevent_id, billing_user_id, total_amount, attendees } = req.body;
@@ -575,4 +737,5 @@ export {
   createOrderForBillingUser,
   issuePassToAttendees,
   issueGlobalPassToAttendees,
+  createGlobalPassOrderForBillingUser,
 };

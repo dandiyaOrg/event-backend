@@ -66,5 +66,5 @@ startServer();
 // method_of_payment
 // source
 // 4. Create order for global bass from the billing User
-// 5. Subevent date should lie between start and end date of event
 // 6. pass controller getAll function
+//  need to check createBillingUser for subEventAttendee entry

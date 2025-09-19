@@ -368,12 +368,38 @@ const attendeeSchema = Joi.object({
   pass_id: commonFields.idSchema.label("Pass ID"),
 });
 
+const attendeeGlobalPassSchema = Joi.object({
+  name: commonFields.name.label("Attendee Name"),
+  whatsapp: commonFields.mobileNumber.label("WhatsApp Number"),
+  email: commonFields.email.label("Email"),
+  dob: commonFields.dateSchema.label("Date of Birth"),
+  gender: commonFields.gender.label("Gender"),
+});
+
 const createOrderSchema = Joi.object({
   subevent_id: commonFields.idSchema.label("Sub Event ID"),
   billing_user_id: commonFields.idSchema.label("Billing User ID"),
   total_amount: commonFields.amount.label("Total Amount"),
   attendees: Joi.array()
     .items(attendeeSchema)
+    .min(1)
+    .max(5)
+    .required()
+    .label("Attendees")
+    .messages({
+      "array.base": "{#label} must be an array",
+      "array.min": "At least {#limit} attendee is required",
+      "array.max": "Maximum {#limit} attendees allowed",
+      "any.required": "{#label} are required",
+    }),
+});
+const createGlobalPassOrderSchema = Joi.object({
+  event_id: commonFields.idSchema.label("Event ID"),
+  billing_user_id: commonFields.idSchema.label("Billing User ID"),
+  total_amount: commonFields.amount.label("Total Amount"),
+  pass_id: commonFields.idSchema.label("Pass Id"),
+  attendees: Joi.array()
+    .items(attendeeGlobalPassSchema)
     .min(1)
     .max(5)
     .required()
@@ -424,4 +450,5 @@ export {
   createOrderSchema,
   createPass,
   updatePassvalidation,
+  createGlobalPassOrderSchema,
 };

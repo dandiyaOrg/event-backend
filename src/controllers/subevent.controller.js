@@ -9,7 +9,7 @@ import { Event, SubEvent } from "../db/models/index.js";
 import { validate as isUUID } from "uuid";
 import { Op } from "sequelize";
 
-// checked- fine - small issues fixed 
+// checked- fine - small issues fixed
 const createSubEvent = asyncHandler(async (req, res, next) => {
   try {
     const {
@@ -27,6 +27,19 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
     if (!event) {
       return next(new ApiError(404, `Event with id ${event_id} not found`));
     }
+    const eventStartDate = new Date(event.date_start);
+    const eventEndDate = new Date(event.date_end);
+    const subEventDate = new Date(date);
+
+    if (subEventDate < eventStartDate || subEventDate > eventEndDate) {
+      return next(
+        new ApiError(
+          400,
+          `SubEvent date must be between event start date (${event.date_start}) and end date (${event.date_end})`
+        )
+      );
+    }
+
     const existingEvent = await SubEvent.findOne({
       where: { name: name, event_id: event_id },
     });
@@ -64,9 +77,9 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
     let imageUrl;
     if (imagelocalPath) {
       try {
-         const { success, data, error } =
+        const { success, data, error } =
           await uploadOnCloudinary(imagelocalPath);
-         if (!success) {
+        if (!success) {
           return next(
             new ApiError(500, "Error on uploading design on clodinary", error)
           );
@@ -90,7 +103,7 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
       end_time,
       day,
       quantity,
-      available_quantity:quantity,
+      available_quantity: quantity,
       images: [imageUrl],
     });
 
@@ -108,8 +121,7 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
-
-// checked- working 
+// checked- working
 const deleteSubEvent = asyncHandler(async (req, res, next) => {
   try {
     const { subeventId } = req.params;
@@ -122,7 +134,9 @@ const deleteSubEvent = asyncHandler(async (req, res, next) => {
     });
 
     if (!subEvent) {
-      return next(new ApiError(404, `SubEvent with id ${subeventId} not found`));
+      return next(
+        new ApiError(404, `SubEvent with id ${subeventId} not found`)
+      );
     }
 
     if (subEvent.images) {
@@ -145,7 +159,7 @@ const deleteSubEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
-// checked-- working 
+// checked-- working
 const getAllSubeventOfEvent = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -197,7 +211,7 @@ const getSubEventById = asyncHandler(async (req, res, next) => {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-// checked working -- name miss match issue 
+// checked working -- name miss match issue
 const UpdateSubevent = asyncHandler(async (req, res, next) => {
   try {
     const { subeventId } = req.params;

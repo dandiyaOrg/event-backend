@@ -9,6 +9,7 @@ import {
   getAllEventByAdmin,
   updateEventStatus,
   getAllSubeventsWithPasses,
+  getGlobalPassForEvent,
 } from "../controllers/event.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -19,7 +20,8 @@ import {
 
 const router = Router();
 
-router.route("/:eventId/subevents").post(getAllSubeventsWithPasses);
+router.route("/subevents/:eventId").post(getAllSubeventsWithPasses);
+router.route("/global/:eventId").post(getGlobalPassForEvent);
 
 router.use(verifyJWT);
 
@@ -31,7 +33,7 @@ router
     registerEvent
   );
 // Get events by admin
-router.route("/all").get(getAllEventByAdmin);  
+router.route("/all").get(getAllEventByAdmin);
 // CRUD operations by ID (generic)
 router
   .route("/:eventId")

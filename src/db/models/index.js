@@ -15,6 +15,7 @@ import CheckingRecord from "./checkin.record.model.js";
 import PassSubEvent from "./pass.subevent.model.js";
 import EventBillingUsers from "./eventBillingUser.model.js";
 import SubEventAttendee from "./subEventAttendee.model.js";
+
 // Define associations
 const defineAssociations = () => {
   // ==================== ADMIN RELATIONSHIPS ====================
@@ -65,7 +66,10 @@ const defineAssociations = () => {
     onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });
+
   // ==================== PASS RELATIONSHIPS ====================
+
+  // Pass ↔ SubEvent (Many-to-Many through PassSubEvent)
   Pass.belongsToMany(SubEvent, {
     through: PassSubEvent,
     foreignKey: "pass_id",
@@ -79,6 +83,36 @@ const defineAssociations = () => {
     otherKey: "pass_id",
     as: "passes",
   });
+
+  // PassSubEvent associations for direct access
+  PassSubEvent.belongsTo(Pass, {
+    foreignKey: "pass_id",
+    as: "pass",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  Pass.hasMany(PassSubEvent, {
+    foreignKey: "pass_id",
+    as: "passSubEvents",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  PassSubEvent.belongsTo(SubEvent, {
+    foreignKey: "subevent_id",
+    as: "subevent",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  SubEvent.hasMany(PassSubEvent, {
+    foreignKey: "subevent_id",
+    as: "passSubEvents",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
   // ==================== BILLING USER & EVENT MANY-TO-MANY ====================
 
   BillingUser.belongsToMany(Event, {
@@ -161,16 +195,24 @@ const defineAssociations = () => {
     onUpdate: "CASCADE",
   });
 
-  // ==================== ORDER ITEM ATTENDEE RELATIONSHIPS ====================
+  // ==================== ORDER ITEM & ATTENDEE MANY-TO-MANY ====================
 
-  // OrderItem → OrderItemAttendee (One-to-Many)
-  OrderItem.hasMany(OrderItemAttendee, {
+  // OrderItem ↔ Attendee (Many-to-Many through OrderItemAttendee)
+  OrderItem.belongsToMany(Attendee, {
+    through: OrderItemAttendee,
     foreignKey: "order_item_id",
-    as: "attendee_assignments",
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
+    otherKey: "attendee_id",
+    as: "attendees",
   });
 
+  Attendee.belongsToMany(OrderItem, {
+    through: OrderItemAttendee,
+    foreignKey: "attendee_id",
+    otherKey: "order_item_id",
+    as: "order_items",
+  });
+
+  // OrderItemAttendee associations for direct access
   OrderItemAttendee.belongsTo(OrderItem, {
     foreignKey: "order_item_id",
     as: "order_item",
@@ -178,10 +220,9 @@ const defineAssociations = () => {
     onUpdate: "CASCADE",
   });
 
-  // Attendee → OrderItemAttendee (One-to-Many)
-  Attendee.hasMany(OrderItemAttendee, {
-    foreignKey: "attendee_id",
-    as: "order_item_assignments",
+  OrderItem.hasMany(OrderItemAttendee, {
+    foreignKey: "order_item_id",
+    as: "orderItemAttendees",
     onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });
@@ -189,6 +230,63 @@ const defineAssociations = () => {
   OrderItemAttendee.belongsTo(Attendee, {
     foreignKey: "attendee_id",
     as: "attendee",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  Attendee.hasMany(OrderItemAttendee, {
+    foreignKey: "attendee_id",
+    as: "orderItemAttendees",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  // ==================== SUBEVENT & ATTENDEE MANY-TO-MANY ====================
+
+  // SubEvent ↔ Attendee (Many-to-Many through SubEventAttendee)
+  SubEvent.belongsToMany(Attendee, {
+    through: SubEventAttendee,
+    foreignKey: "subevent_id",
+    otherKey: "attendee_id",
+    as: "attendees",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  Attendee.belongsToMany(SubEvent, {
+    through: SubEventAttendee,
+    foreignKey: "attendee_id",
+    otherKey: "subevent_id",
+    as: "subevents",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  // SubEventAttendee associations for direct access
+  SubEventAttendee.belongsTo(SubEvent, {
+    foreignKey: "subevent_id",
+    as: "subevent",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  SubEvent.hasMany(SubEventAttendee, {
+    foreignKey: "subevent_id",
+    as: "subeventAttendees",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  SubEventAttendee.belongsTo(Attendee, {
+    foreignKey: "attendee_id",
+    as: "attendee",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  Attendee.hasMany(SubEventAttendee, {
+    foreignKey: "attendee_id",
+    as: "subeventAttendees",
     onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });
@@ -225,25 +323,6 @@ const defineAssociations = () => {
     onUpdate: "CASCADE",
   });
 
-  // SubEvent ↔ Attendee many-to-many through SubEventAttendee
-  SubEvent.belongsToMany(Attendee, {
-    through: SubEventAttendee,
-    foreignKey: "subevent_id",
-    otherKey: "attendee_id",
-    as: "attendees",
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
-  });
-
-  Attendee.belongsToMany(SubEvent, {
-    through: SubEventAttendee,
-    foreignKey: "attendee_id",
-    otherKey: "subevent_id",
-    as: "subevents",
-    onDelete: "CASCADE",
-    onUpdate: "CASCADE",
-  });
-
   // OrderItem → IssuedPass (One-to-Many)
   OrderItem.hasMany(IssuedPass, {
     foreignKey: "order_item_id",
@@ -261,11 +340,8 @@ const defineAssociations = () => {
 
   // ==================== CHECKING RECORD RELATIONSHIPS ====================
 
-  // Attendee → CheckingRecord (One-to-Many)
-
-  // IssuedPass → CheckingRecord (One-to-Many)
-
-  IssuedPass.belongsTo(CheckingRecord, {
+  // IssuedPass → CheckingRecord (One-to-Many) - FIXED: Changed from belongsTo to hasMany
+  IssuedPass.hasMany(CheckingRecord, {
     foreignKey: "issued_pass_id",
     as: "checking_records",
     onDelete: "RESTRICT",
@@ -274,7 +350,7 @@ const defineAssociations = () => {
 
   CheckingRecord.belongsTo(IssuedPass, {
     foreignKey: "issued_pass_id",
-    as: "pass",
+    as: "issued_pass", // Changed alias from "pass" to "issued_pass" for clarity
     onDelete: "RESTRICT",
     onUpdate: "CASCADE",
   });
@@ -294,22 +370,6 @@ const defineAssociations = () => {
     onUpdate: "CASCADE",
   });
 
-  // ==================== MANY-TO-MANY RELATIONSHIPS ====================
-
-  // OrderItem ↔ Attendee (through OrderItemAttendee)
-  OrderItem.belongsToMany(Attendee, {
-    through: OrderItemAttendee,
-    foreignKey: "order_item_id",
-    otherKey: "attendee_id",
-    as: "attendees",
-  });
-
-  Attendee.belongsToMany(OrderItem, {
-    through: OrderItemAttendee,
-    foreignKey: "attendee_id",
-    otherKey: "order_item_id",
-    as: "order_items",
-  });
   console.log("✅ All model associations defined successfully");
 };
 
@@ -332,13 +392,14 @@ export {
   defineAssociations,
   PassSubEvent,
   EventBillingUsers,
+  SubEventAttendee,
 };
 
 // Function to sync all models
 const syncModels = async (options = {}) => {
   try {
+    defineAssociations(); // Call this first to define all associations
     await sequelize.sync(options);
-    defineAssociations();
     console.log("✅ All models synchronized successfully");
   } catch (error) {
     console.error("❌ Error synchronizing models:", error);

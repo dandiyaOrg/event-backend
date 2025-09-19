@@ -9,6 +9,7 @@ import {
   SubEvent,
   Admin,
   Event,
+  PassSubEvent,
 } from "../db/models/index.js";
 import {
   uploadOnCloudinary,
@@ -374,6 +375,74 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
   }
 });
 
+const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
+  try {
+    const { billingUserId } = req.body;
+    if (!billingUserId) {
+      return next(400, "Billing User Id is required");
+    }
+    const { eventId } = req.params;
+    if (!eventId) {
+      return next(new ApiError(400, "Event ID is required in query params"));
+    }
+    const event = await Event.findByPk(eventId);
+    if (!event) {
+      return next(new ApiError(404, `Event with id ${eventId} not found`));
+    }
+    const subevents = await SubEvent.findAll({
+      where: { event_id: eventId },
+      attributes: ["subevent_id"],
+    });
+    const subeventIds = subevents.map((s) => s.subevent_id);
+    if (subeventIds.length === 0) {
+      return next(new ApiError(404, "No subevents found for this event"));
+    }
+
+    // 3. Find all distinct pass_ids linked to those subevents
+    const passIdRows = await PassSubEvent.findAll({
+      where: {
+        subevent_id: { [Op.in]: subeventIds },
+      },
+      attributes: ["pass_id"],
+      group: ["pass_id"],
+    });
+    const candidatePassIds = passIdRows.map((row) => row.pass_id);
+    if (candidatePassIds.length === 0) {
+      return next(new ApiError(404, "No passes linked to event subevents"));
+    }
+    let globalPassId = null;
+    for (const passId of candidatePassIds) {
+      const count = await PassSubEvent.count({
+        where: { pass_id: passId },
+      });
+
+      if (count === event.number_of_days) {
+        globalPassId = passId;
+        break;
+      }
+    }
+    if (!globalPassId) {
+      return next(new ApiError(404, "Global pass not found for this event"));
+    }
+    const globalPass = await Pass.findByPk(globalPassId);
+
+    if (!globalPass) {
+      return next(new ApiError(404, "Global pass details not found"));
+    }
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { pass: { ...globalPass } },
+          "Global pass fetched successfully"
+        )
+      );
+  } catch (error) {
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
 export {
   registerEvent,
   deleteEvent,
@@ -382,4 +451,5 @@ export {
   getAllEventByAdmin,
   updateEventStatus,
   getAllSubeventsWithPasses,
+  getGlobalPassForEvent,
 };
