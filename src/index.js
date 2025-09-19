@@ -67,4 +67,4 @@ startServer();
 // source
 // 4. Create order for global bass from the billing User
 // 5. Subevent date should lie between start and end date of event
-// 6.
+// 6. pass controller getAll function
