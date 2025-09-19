@@ -3,39 +3,42 @@ import Joi from "joi";
 // common schema
 export const commonFields = {
   name: Joi.string().min(2).max(100).required().messages({
-    "string.base": "Name must be a text",
-    "string.empty": "Name is required",
-    "string.min": "Name must be at least {#limit} characters",
-    "string.max": "Name cannot exceed {#limit} characters",
-    "any.required": "Name is required",
+    "string.base": "{#label} must be a text",
+    "string.empty": "{#label} is required",
+    "string.min": "{#label} must be at least {#limit} characters",
+    "string.max": "{#label} cannot exceed {#limit} characters",
+    "any.required": "{#label} is required",
   }),
 
   mobileNumber: Joi.string()
-    .pattern(/^\d{10}$/)
+    .pattern(/^[6-9]\d{9}$/) // More specific pattern for Indian mobile numbers
     .required()
     .messages({
-      "string.pattern.base": "Mobile number must contain 10 digits",
-      "string.empty": "Mobile number is required",
-      "any.required": "Mobile number is required",
+      "string.base": "{#label} must be a text",
+      "string.pattern.base": "{#label} must be a valid 10-digit mobile number",
+      "string.empty": "{#label} is required",
+      "any.required": "{#label} is required",
     }),
 
   email: Joi.string().email().required().messages({
-    "string.email": "Please provide a valid email address",
-    "string.empty": "Email is required",
-    "any.required": "Email is required",
+    "string.base": "{#label} must be a text",
+    "string.email": "Please provide a valid {#label}",
+    "string.empty": "{#label} is required",
+    "any.required": "{#label} is required",
   }),
 
   address: Joi.string()
     .min(10)
     .max(255)
-    .pattern(/^[a-zA-Z0-9\s,.'\-#\n]+$/)
+    .pattern(/^[a-zA-Z0-9\s,.'\-#\n\/]+$/) // Added forward slash for addresses
     .required()
     .messages({
-      "string.empty": "Address is required",
-      "string.min": "Address must be at least {#limit} characters",
-      "string.max": "Address cannot exceed {#limit} characters",
-      "string.pattern.base": "Address contains invalid characters",
-      "any.required": "Address is required",
+      "string.base": "{#label} must be a text",
+      "string.empty": "{#label} is required",
+      "string.min": "{#label} must be at least {#limit} characters",
+      "string.max": "{#label} cannot exceed {#limit} characters",
+      "string.pattern.base": "{#label} contains invalid characters",
+      "any.required": "{#label} is required",
     }),
 
   password: Joi.string()
@@ -48,38 +51,57 @@ export const commonFields = {
     )
     .required()
     .messages({
-      "string.empty": "Password is required",
-      "string.min": "Password must be at least {#limit} characters",
-      "string.max": "Password cannot exceed {#limit} characters",
+      "string.base": "{#label} must be a text",
+      "string.empty": "{#label} is required",
+      "string.min": "{#label} must be at least {#limit} characters",
+      "string.max": "{#label} cannot exceed {#limit} characters",
       "string.pattern.base":
-        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
-      "any.required": "Password is required",
+        "{#label} must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+      "any.required": "{#label} is required",
     }),
 
   organization: Joi.string().max(200).required().messages({
-    "string.empty": "Organization is required",
-    "string.max": "Organization cannot exceed {#limit} characters",
-    "any.required": "Organization is required",
+    "string.base": "{#label} must be a text",
+    "string.empty": "{#label} is required",
+    "string.max": "{#label} cannot exceed {#limit} characters",
+    "any.required": "{#label} is required",
   }),
-  otp: Joi.string().length(6).required().messages({
-    "string.base": "OTP must be a string",
-    "string.length": "OTP must be {#limit} characters long",
-    "string.empty": "OTP is required",
-    "any.required": "OTP is required",
-  }),
-  username: Joi.string().min(6).required().messages({
-    "string.base": "Username must be a string",
-    "string.empty": "Username is required",
-    "string.min": "Username must be at least {#limit} characters",
-    "any.required": "Username is required",
-  }),
+
+  otp: Joi.string()
+    .length(6)
+    .pattern(/^\d{6}$/) // Ensure OTP contains only digits
+    .required()
+    .messages({
+      "string.base": "{#label} must be a text",
+      "string.length": "{#label} must be {#limit} characters long",
+      "string.pattern.base": "{#label} must contain only digits",
+      "string.empty": "{#label} is required",
+      "any.required": "{#label} is required",
+    }),
+
+  username: Joi.string()
+    .min(6)
+    .max(50) // Added max length for username
+    .pattern(/^[a-zA-Z0-9_]+$/) // Username pattern
+    .required()
+    .messages({
+      "string.base": "{#label} must be a text",
+      "string.empty": "{#label} is required",
+      "string.min": "{#label} must be at least {#limit} characters",
+      "string.max": "{#label} cannot exceed {#limit} characters",
+      "string.pattern.base":
+        "{#label} can only contain letters, numbers, and underscores",
+      "any.required": "{#label} is required",
+    }),
+
   description: Joi.string().min(10).max(2000).required().messages({
-    "string.base": "Description must be a text",
-    "string.empty": "Description is required",
-    "string.min": "Description must be at least {#limit} characters",
-    "string.max": "Description cannot exceed {#limit} characters",
-    "any.required": "Description is required",
+    "string.base": "{#label} must be a text",
+    "string.empty": "{#label} is required",
+    "string.min": "{#label} must be at least {#limit} characters",
+    "string.max": "{#label} cannot exceed {#limit} characters",
+    "any.required": "{#label} is required",
   }),
+
   event_type: Joi.string()
     .valid(
       "conference",
@@ -93,197 +115,300 @@ export const commonFields = {
     )
     .required()
     .messages({
-      "string.base": "Event type must be a text",
-      "string.empty": "Event type is required",
+      "string.base": "{#label} must be a text",
+      "string.empty": "{#label} is required",
       "any.only":
-        "Event type must be one of conference, workshop, seminar, concert, exhibition, sports, festival, other",
-      "any.required": "Event type is required",
+        "{#label} must be one of: conference, workshop, seminar, concert, exhibition, sports, festival, other",
+      "any.required": "{#label} is required",
     }),
-  venue: Joi.string().min(5).max(255).required().messages({
-    "string.base": "Venue must be a text",
-    "string.empty": "Venue is required",
-    "string.min": "Venue must be at least {#limit} characters",
-    "string.max": "Venue cannot exceed {#limit} characters",
-    "any.required": "Venue is required",
-  }),
-  url: Joi.string().uri().required().messages({
-    "string.base": "Google map link must be a text",
-    "string.empty": "Google map link is required",
-    "string.uri": "Google map link must be a valid URL",
-    "any.required": "Google map link is required",
-  }),
-  integerSchema: Joi.number().integer().min(1).required().messages({
-    "number.base": "Number of days must be a number",
-    "number.integer": "Number of days must be an integer",
-    "number.min": "Number of days must be at least {#limit}",
-    "any.required": "Number of days is required",
-  }),
-  dateSchema: Joi.string()
-    .pattern(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD")
+
+  pass_category: Joi.string()
+    .valid("Group", "Stag Male", "Stag Female", "Couple", "Full Pass")
     .required()
     .messages({
-      "string.pattern.name": "Date must be in YYYY-MM-DD format",
-      "any.required": "Date is required",
+      // Fixed typo: was .message() now .messages()
+      "string.base": "{#label} must be a text",
+      "string.empty": "{#label} is required",
+      "any.only":
+        "{#label} must be one of: Group, Stag Male, Stag Female, Couple, Full Pass",
+      "any.required": "{#label} is required",
     }),
+
+  discount_percentage: Joi.number()
+    .precision(2)
+    .min(0)
+    .max(100)
+    .required()
+    .messages({
+      "number.base": "{#label} must be a number",
+      "number.precision":
+        "{#label} cannot have more than {#limit} decimal places",
+      "number.min": "{#label} cannot be negative",
+      "number.max": "{#label} cannot exceed {#limit}%",
+      "any.required": "{#label} is required",
+    }),
+
+  venue: Joi.string().min(5).max(255).required().messages({
+    "string.base": "{#label} must be a text",
+    "string.empty": "{#label} is required",
+    "string.min": "{#label} must be at least {#limit} characters",
+    "string.max": "{#label} cannot exceed {#limit} characters",
+    "any.required": "{#label} is required",
+  }),
+
+  url: Joi.string().uri().required().messages({
+    "string.base": "{#label} must be a text",
+    "string.empty": "{#label} is required",
+    "string.uri": "{#label} must be a valid URL",
+    "any.required": "{#label} is required",
+  }),
+
+  integerSchema: Joi.number().integer().min(1).required().messages({
+    "number.base": "{#label} must be a number",
+    "number.integer": "{#label} must be an integer",
+    "number.min": "{#label} must be at least {#limit}",
+    "any.required": "{#label} is required",
+  }),
+
+  dateSchema: Joi.date()
+    .iso() // Use Joi's built-in date validation
+    .required()
+    .messages({
+      "date.base": "{#label} must be a valid date",
+      "date.format": "{#label} must be in YYYY-MM-DD format",
+      "any.required": "{#label} is required",
+    }),
+
   timeSchema: Joi.string()
     .pattern(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/, "HH:MM:SS")
     .required()
     .messages({
-      "string.pattern.name": "Time must be in HH:MM:SS format",
-      "any.required": "Time is required",
+      "string.base": "{#label} must be a text",
+      "string.pattern.name": "{#label} must be in HH:MM:SS format",
+      "any.required": "{#label} is required",
     }),
+
   event_status: Joi.string()
     .valid("Initiated", "Active", "Ready", "Closed", "Cancelled")
     .required()
     .messages({
-      "string.base": "Event status must be a text",
-      "string.empty": "Event status is required",
-      "any.only": "Initiated, Active, Ready, Closed, Cancelled",
-      "any.required": "Event status is required",
+      "string.base": "{#label} must be a text",
+      "string.empty": "{#label} is required",
+      "any.only":
+        "{#label} must be one of: Initiated, Active, Ready, Closed, Cancelled",
+      "any.required": "{#label} is required",
     }),
+
   gender: Joi.string().valid("Male", "Female", "Other").required().messages({
-    "string.base": "Gender must be a text",
-    "string.empty": "Gender is required",
-    "any.only": "Male, Female, Other",
-    "any.required": "Gender is required",
+    "string.base": "{#label} must be a text",
+    "string.empty": "{#label} is required",
+    "any.only": "{#label} must be one of: Male, Female, Other",
+    "any.required": "{#label} is required",
   }),
+
   idSchema: Joi.string().guid({ version: "uuidv4" }).required().messages({
-    "string.guid": "Event ID must be a valid UUIDv4",
-    "string.empty": "Event ID is required",
-    "any.required": "Event ID is required",
+    "string.base": "{#label} must be a text",
+    "string.guid": "{#label} must be a valid UUIDv4",
+    "string.empty": "{#label} is required",
+    "any.required": "{#label} is required",
   }),
+
   image: Joi.any().required().messages({
-    "any.required": "Sub event image is required",
+    "any.required": "{#label} is required",
   }),
+
   amount: Joi.number().precision(2).min(0).required().messages({
-    "number.base": "Amount must be a number",
-    "number.min": "Amount cannot be negative",
-    "any.required": "Amount is required",
+    "number.base": "{#label} must be a number",
+    "number.precision":
+      "{#label} cannot have more than {#limit} decimal places",
+    "number.min": "{#label} cannot be negative",
+    "any.required": "{#label} is required",
+  }),
+
+  validity: Joi.number().integer().min(1).max(365).required().messages({
+    // Increased max to 365 days
+    "number.base": "{#label} must be a number",
+    "number.integer": "{#label} must be an integer",
+    "number.min": "{#label} must be at least {#limit} day(s)",
+    "number.max": "{#label} cannot exceed {#limit} days",
+    "any.required": "{#label} is required",
+  }),
+  is_active: Joi.boolean().required().messages({
+    "boolean.base": "{#label} must be a boolean value",
   }),
 };
 
 // admin registration schema
 const adminRegisterSchema = Joi.object({
-  name: commonFields.name,
-  mobile_no: commonFields.mobileNumber,
-  email: commonFields.email,
-  address: commonFields.address,
-  password: commonFields.password,
-  organization: commonFields.organization,
+  name: commonFields.name.label("Name"),
+  mobile_no: commonFields.mobileNumber.label("Mobile Number"),
+  email: commonFields.email.label("Email"),
+  address: commonFields.address.label("Address"),
+  password: commonFields.password.label("Password"),
+  organization: commonFields.organization.label("Organization"),
 });
 
 const employeeRegisterSchema = Joi.object({
-  name: commonFields.name,
-  mobile_no: commonFields.mobileNumber,
-  email: commonFields.email,
-  password: commonFields.password,
-  username: commonFields.username,
+  name: commonFields.name.label("Name"),
+  mobile_no: commonFields.mobileNumber.label("Mobile Number"),
+  email: commonFields.email.label("Email"),
+  password: commonFields.password.label("Password"),
+  username: commonFields.username.label("Username"),
 });
 
 const employeeUpdateSchema = Joi.object({
-  name: commonFields.name.optional(),
-  mobile_no: commonFields.mobileNumber.optional(),
-  email: commonFields.email.optional(),
-  password: commonFields.password.optional(),
-  username: commonFields.username.optional(),
-  is_active: Joi.boolean().optional(),
-}).min(1);
+  name: commonFields.name.optional().label("Name"),
+  mobile_no: commonFields.mobileNumber.optional().label("Mobile Number"),
+  email: commonFields.email.optional().label("Email"),
+  password: commonFields.password.optional().label("Password"),
+  username: commonFields.username.optional().label("Username"),
+  is_active: commonFields.is_active.label("Active Status"),
+})
+  .min(1)
+  .messages({
+    "object.min": "At least one field must be provided for update",
+  });
 
 const updatePasswordSchema = Joi.object({
-  newPassword: commonFields.password,
-}).unknown(true); // allow other fields like admin_id
+  newPassword: commonFields.password.label("New Password"),
+}).unknown(true);
 
 const otpCheckSchema = Joi.object({
-  otp: commonFields.otp,
-}).unknown(true); // allow other fields like admin_id
+  otp: commonFields.otp.label("OTP"),
+}).unknown(true);
 
 const eventRegisterSchema = Joi.object({
-  event_name: commonFields.name,
-  description: commonFields.description,
-  venue: commonFields.venue,
-  google_map_link: commonFields.url,
-  number_of_days: commonFields.integerSchema,
-  date_start: commonFields.dateSchema,
-  date_end: commonFields.dateSchema,
-  event_type: commonFields.event_type,
-  image: commonFields.image,
-});
+  event_name: commonFields.name.label("Event Name"),
+  description: commonFields.description.label("Description"),
+  venue: commonFields.venue.label("Venue"),
+  google_map_link: commonFields.url.label("Google Map Link"),
+  number_of_days: commonFields.integerSchema.label("Number of Days"),
+  date_start: commonFields.dateSchema.label("Start Date"),
+  date_end: commonFields.dateSchema.label("End Date"),
+  event_type: commonFields.event_type.label("Event Type"),
+  image: commonFields.image.label("Event Image"),
+})
+  .custom((value, helpers) => {
+    // Custom validation to ensure end date is after start date
+    if (new Date(value.date_end) <= new Date(value.date_start)) {
+      return helpers.error("any.custom", {
+        message: "End Date must be after Start Date",
+      });
+    }
+    return value;
+  })
+  .messages({
+    "any.custom": "{#message}",
+  });
 
 const eventUpdateSchema = Joi.object({
-  event_name: commonFields.name.optional(),
-  description: commonFields.description.optional(),
-  venue: commonFields.venue.optional(),
-  google_map_link: commonFields.url.optional(),
-  number_of_days: commonFields.integerSchema.optional(),
-  date_start: commonFields.dateSchema.optional(),
-  date_end: commonFields.dateSchema.optional(),
-  event_type: commonFields.event_type.optional(),
-  image: commonFields.image.optional(),
-}).min(1);
+  event_name: commonFields.name.optional().label("Event Name"),
+  description: commonFields.description.optional().label("Description"),
+  venue: commonFields.venue.optional().label("Venue"),
+  google_map_link: commonFields.url.optional().label("Google Map Link"),
+  number_of_days: commonFields.integerSchema.optional().label("Number of Days"),
+  date_start: commonFields.dateSchema.optional().label("Start Date"),
+  date_end: commonFields.dateSchema.optional().label("End Date"),
+  event_type: commonFields.event_type.optional().label("Event Type"),
+  image: commonFields.image.optional().label("Event Image"),
+})
+  .min(1)
+  .messages({
+    "object.min": "At least one field must be provided for update",
+  });
 
 const updateEventStatusSchema = Joi.object({
-  status: commonFields.event_status.required(),
+  status: commonFields.event_status.label("Event Status"),
 });
 
 const subEventSchema = Joi.object({
-  name: commonFields.name,
-  event_id: commonFields.idSchema,
-  date: commonFields.dateSchema,
-  start_time: commonFields.timeSchema,
-  end_time: commonFields.timeSchema,
-  day: commonFields.integerSchema,
-  quantity: commonFields.integerSchema,
-  description: commonFields.description,
-  image: commonFields.image,
+  name: commonFields.name.label("Sub Event Name"),
+  event_id: commonFields.idSchema.label("Event ID"),
+  date: commonFields.dateSchema.label("Date"),
+  start_time: commonFields.timeSchema.label("Start Time"),
+  end_time: commonFields.timeSchema.label("End Time"),
+  day: commonFields.integerSchema.label("Day"),
+  quantity: commonFields.integerSchema.label("Quantity"),
+  description: commonFields.description.label("Description"),
+  image: commonFields.image.label("Sub Event Image"),
 });
 
 const updateSubEventSchema = Joi.object({
-  name: commonFields.name.optional(),
-  date: commonFields.dateSchema.optional(),
-  start_time: commonFields.timeSchema.optional(),
-  end_time: commonFields.timeSchema.optional(),
-  day: commonFields.integerSchema.optional(),
-  quantity: commonFields.integerSchema.optional(),
-  description: commonFields.description.optional(),
-  image: commonFields.image.optional(),
-}).min(1);
+  name: commonFields.name.optional().label("Sub Event Name"),
+  date: commonFields.dateSchema.optional().label("Date"),
+  start_time: commonFields.timeSchema.optional().label("Start Time"),
+  end_time: commonFields.timeSchema.optional().label("End Time"),
+  day: commonFields.integerSchema.optional().label("Day"),
+  quantity: commonFields.integerSchema.optional().label("Quantity"),
+  description: commonFields.description.optional().label("Description"),
+  image: commonFields.image.optional().label("Sub Event Image"),
+})
+  .min(1)
+  .messages({
+    "object.min": "At least one field must be provided for update",
+  });
 
 const createBillingUserSchema = Joi.object({
-  name: commonFields.name,
-  mobile_no: commonFields.mobileNumber,
-  whatsapp: commonFields.mobileNumber,
-  email: commonFields.email,
-  address: commonFields.address,
-  dob: commonFields.dateSchema,
-  gender: commonFields.gender,
-  event_id: commonFields.idSchema,
+  name: commonFields.name.label("Name"),
+  mobile_no: commonFields.mobileNumber.label("Mobile Number"),
+  whatsapp: commonFields.mobileNumber.label("WhatsApp Number"),
+  email: commonFields.email.label("Email"),
+  address: commonFields.address.label("Address"),
+  dob: commonFields.dateSchema.label("Date of Birth"),
+  gender: commonFields.gender.label("Gender"),
+  event_id: commonFields.idSchema.label("Event ID"),
 });
 
 const attendeeSchema = Joi.object({
-  name: commonFields.name,
-  whatsapp: commonFields.mobileNumber,
-  email: commonFields.email,
-  dob: commonFields.dateSchema,
-  gender: commonFields.gender,
-  pass_id: commonFields.idSchema,
+  name: commonFields.name.label("Attendee Name"),
+  whatsapp: commonFields.mobileNumber.label("WhatsApp Number"),
+  email: commonFields.email.label("Email"),
+  dob: commonFields.dateSchema.label("Date of Birth"),
+  gender: commonFields.gender.label("Gender"),
+  pass_id: commonFields.idSchema.label("Pass ID"),
 });
 
 const createOrderSchema = Joi.object({
-  subevent_id: commonFields.idSchema,
-  billing_user_id: commonFields.idSchema,
-  total_amount: commonFields.amount,
+  subevent_id: commonFields.idSchema.label("Sub Event ID"),
+  billing_user_id: commonFields.idSchema.label("Billing User ID"),
+  total_amount: commonFields.amount.label("Total Amount"),
   attendees: Joi.array()
     .items(attendeeSchema)
     .min(1)
     .max(5)
     .required()
+    .label("Attendees")
     .messages({
-      "array.base": "Attendees must be an array",
-      "array.min": "At least one attendee is required",
-      "array.max": "Maximum five attendees allowed",
-      "any.required": "Attendees are required",
+      "array.base": "{#label} must be an array",
+      "array.min": "At least {#limit} attendee is required",
+      "array.max": "Maximum {#limit} attendees allowed",
+      "any.required": "{#label} are required",
     }),
 });
+
+const createPass = Joi.object({
+  subevent_id: commonFields.idSchema.optional().label("Sub Event ID"),
+  event_id: commonFields.idSchema.optional().label("Event ID"),
+  category: commonFields.pass_category.label("Pass Category"),
+  total_price: commonFields.amount.label("Total Price"),
+  discount_percentage: commonFields.discount_percentage.label(
+    "Discount Percentage"
+  ),
+  validity: commonFields.validity.optional().label("Validity"),
+  is_global: commonFields.is_active.optional().label("Is Global"),
+  is_active: Joi.boolean().optional().label("Is Active").messages({
+    "boolean.base": "{#label} must be a boolean value",
+  }),
+})
+  .or("subevent_id", "event_id")
+  .messages({
+    "object.missing": "Either Sub Event ID or Event ID must be provided",
+  });
+
+const updatePassvalidation = Joi.object({
+  discount_percentage: commonFields.discount_percentage,
+});
+
 export {
   adminRegisterSchema,
   updatePasswordSchema,
@@ -297,29 +422,6 @@ export {
   updateSubEventSchema,
   createBillingUserSchema,
   createOrderSchema,
+  createPass,
+  updatePassvalidation,
 };
-
-// TODO: need dynamic message for commonFields
-// commonFields.js
-
-// export const amount = Joi.number()
-//   .precision(2)
-//   .min(0)
-//   .required()
-//   .label("Amount")
-//   .messages({
-//     "number.base": "{#label} must be a number",
-//     "number.min": "{#label} cannot be negative",
-//     "any.required": "{#label} is required",
-//   });
-
-// export const image = Joi.any()
-//   .required()
-//   .label("Image")
-//   .messages({
-//     "any.required": "{#label} is required",
-//   });
-// const schema = Joi.object({
-//   total_amount: amount.label("total_amount"),
-//   subevent_image: image.label("subevent_image"),
-// });

@@ -70,7 +70,7 @@ const Pass = sequelize.define(
     },
     is_active: {
       type: DataTypes.BOOLEAN,
-      defaultValue: true,
+      defaultValue: false,
       allowNull: false,
     },
     created_at: {
