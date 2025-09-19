@@ -2,14 +2,16 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import {
-  EventBillingUser,
   BillingUser,
-  Admin,
   Event,
+  PassSubEvent,
   SubEvent,
   Order,
   OrderItem,
+  OrderItemAttendee,
   Attendee,
+  Transaction,
+  IssuedPass,
 } from "../db/models/index.js";
 
 import sendMail from "../utils/sendMail.js";
@@ -231,9 +233,346 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       .json(new ApiResponse(201, { order }, "Order created successfully"));
   } catch (error) {
     await t.rollback();
-    console.error(error);
     return next(new ApiError(500, "Failed to create order", error));
   }
 });
 
-export { createBillingUser, createOrderForBillingUser };
+const issuePassToAttendees = asyncHandler(async (req, res, next) => {
+  try {
+    const { order_id } = req.body;
+
+    if (!order_id) {
+      return next(new ApiError(400, "Order ID is required"));
+    }
+
+    // 1. Fetch order with associated transaction
+    const order = await Order.findByPk(order_id, {
+      include: [{ model: Transaction, as: "transaction" }],
+    });
+
+    if (!order) {
+      return next(new ApiError(404, `Order not found for id: ${order_id}`));
+    }
+
+    const transaction = order.transaction;
+    if (!transaction) {
+      return next(new ApiError(400, "Transaction not found for this order"));
+    }
+
+    // 2. Check transaction status
+    if (transaction.status !== "success") {
+      return next(
+        new ApiError(
+          400,
+          `Transaction status is '${transaction.status}'. Passes can only be issued for successful transactions.`
+        )
+      );
+    }
+
+    // 3. Check amount match (strict equality for cents precision)
+    const orderTotal = parseFloat(order.total_amount).toFixed(2);
+    const transactionAmount = parseFloat(transaction.amount).toFixed(2);
+    if (orderTotal !== transactionAmount) {
+      return next(
+        new ApiError(
+          400,
+          `Transaction amount (${transactionAmount}) does not match order total (${orderTotal}).`
+        )
+      );
+    }
+
+    // 4. Fetch order items with pass
+    const orderItems = await OrderItem.findAll({
+      where: { order_id },
+      include: [{ model: Pass, as: "pass" }],
+    });
+
+    if (!orderItems.length) {
+      return next(new ApiError(400, "No order items found for this order"));
+    }
+
+    await Promise.all(
+      orderItems.map(async (item) => {
+        const order_item_id = item.order_item_id;
+        const pass_id = item.pass_id;
+
+        if (!item.pass) {
+          throw new ApiError(
+            400,
+            `Pass not found for order item ${order_item_id}`
+          );
+        }
+
+        // Get linked subevent(s) for pass (assuming at least one)
+        const passSubEvents = await PassSubEvent.findAll({
+          where: { pass_id },
+          attributes: ["subevent_id"],
+        });
+        if (!passSubEvents.length) {
+          throw new ApiError(400, `No subevents linked with pass ${pass_id}`);
+        }
+        const subeventIds = passSubEvents.map((pse) => pse.subevent_id);
+        const subevents = await SubEvent.findAll({
+          where: { subevent_id: subeventIds },
+          attributes: ["subevent_id", "date", "name"],
+        });
+        if (!subevents.length) {
+          throw new ApiError(400, `SubEvents not found for pass ${pass_id}`);
+        }
+
+        // For simplicity, pick the first subevent for expiry and email context
+        const mainSubEvent = subevents[0];
+        const subeventDate = new Date(mainSubEvent.date);
+        const expiryDate = new Date(
+          subeventDate.getFullYear(),
+          subeventDate.getMonth(),
+          subeventDate.getDate(),
+          23,
+          59,
+          59,
+          999
+        );
+        const orderItemAttendees = await OrderItemAttendee.findAll({
+          where: { order_item_id },
+          include: [{ model: Attendee, as: "attendee" }],
+        });
+
+        if (!orderItemAttendees.length) {
+          throw new ApiError(
+            400,
+            `No attendees found for order item ${order_item_id}`
+          );
+        }
+        await Promise.all(
+          orderItemAttendees.map(async (oia) => {
+            const attendee = oia.attendee;
+            if (!attendee) return;
+
+            const qrData = await generateQR({
+              attendeeId: attendee.attendee_id,
+              passId: pass_id,
+              orderItemId: order_item_id,
+              orderId: order_id,
+            });
+
+            if (!qrData || !qrData.data || !qrData.image) {
+              throw new ApiError(500, "Failed to generate QR code");
+            }
+            const issuedPass = await IssuedPass.create({
+              pass_id,
+              attendee_id: attendee.attendee_id,
+              subevent_id: mainSubEvent.subevent_id,
+              admin_id: attendee.admin_id ?? order.admin_id,
+              transaction_id: transaction.transaction_id,
+              order_item_id,
+              is_expired: false,
+              issued_date: new Date(),
+              expiry_date: expiryDate,
+              booking_number: null,
+              status: "active",
+              used_count: 0,
+              qr_data: qrData.data,
+              qr_image: qrData.image,
+              sponsored_pass: false,
+            });
+
+            await sendMail(attendee.email, "issuedPass", {
+              attendee,
+              qrImage: qrData.image,
+              passCategory: item.pass.category,
+              orderNumber: order_id,
+              subeventName: mainSubEvent.name,
+              expiryDate: issuedPass.expiry_date,
+            });
+          })
+        );
+      })
+    );
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, {}, "Passes issued and emails sent successfully")
+      );
+  } catch (error) {
+    console.error(error);
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
+const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
+  try {
+    const { order_id } = req.body;
+    if (!order_id) {
+      return next(new ApiError(400, "Order ID is required"));
+    }
+
+    // 1. Fetch order with transaction and billing user
+    const order = await Order.findByPk(order_id, {
+      include: [{ model: Transaction, as: "transaction" }],
+    });
+    if (!order) {
+      return next(new ApiError(404, `Order not found for id: ${order_id}`));
+    }
+    const transaction = order.transaction;
+    if (!transaction) {
+      return next(new ApiError(400, "Transaction not found for this order"));
+    }
+
+    // 2. Validate transaction status
+    if (transaction.status !== "success") {
+      return next(
+        new ApiError(
+          400,
+          `Transaction status is '${transaction.status}'. Cannot issue passes.`
+        )
+      );
+    }
+
+    // 3. Validate order items count (should be exactly 1 for global pass)
+    const orderItems = await OrderItem.findAll({
+      where: { order_id },
+      include: [{ model: Pass, as: "pass" }],
+    });
+
+    if (orderItems.length !== 1) {
+      return next(
+        new ApiError(400, "Global pass order must have exactly one order item")
+      );
+    }
+
+    const item = orderItems[0];
+
+    if (!item.pass || !item.pass.is_global) {
+      return next(
+        new ApiError(400, "The order item does not correspond to a global pass")
+      );
+    }
+    const passSubEvents = await PassSubEvent.findAll({
+      where: { pass_id: item.pass.pass_id },
+    });
+
+    if (!passSubEvents.length) {
+      throw new ApiError(
+        400,
+        `No subevents linked with global pass ${item.pass.pass_id}`
+      );
+    }
+
+    const subeventIds = passSubEvents.map((pse) => pse.subevent_id);
+    const subevents = await SubEvent.findAll({
+      where: { subevent_id: subeventIds },
+      attributes: ["subevent_id", "date", "name", "day"],
+      order: [["day", "ASC"]],
+    });
+    if (!subevents.length) {
+      return next(
+        new ApiError(400, "Subevent linked to global pass not found")
+      );
+    }
+
+    // 4. Fetch attendees linked to the order item
+    const orderItemAttendees = await OrderItemAttendee.findAll({
+      where: { order_item_id: item.order_item_id },
+      include: [
+        {
+          model: Attendee,
+          as: "attendee",
+        },
+      ],
+    });
+
+    if (!orderItemAttendees.length) {
+      return next(
+        new ApiError(400, "No attendees found for the global pass order item")
+      );
+    }
+
+    // 6. Issue passes & send emails in parallel
+    await Promise.all(
+      orderItemAttendees.map(async (oia) => {
+        const attendee = oia.attendee;
+        if (!attendee) return;
+        // Generate one QR code per subevent; create issued pass per subevent
+        const issuedPassDetails = await Promise.all(
+          subevents.map(async (subevent) => {
+            const subeventDate = new Date(subevent.date);
+            const expiryDate = new Date(
+              subeventDate.getFullYear(),
+              subeventDate.getMonth(),
+              subeventDate.getDate(),
+              23,
+              59,
+              59,
+              999
+            );
+
+            const qrData = await generateQR({
+              attendeeId: attendee.attendee_id,
+              passId: item.pass.pass_id,
+              orderItemId: item.order_item_id,
+              orderId: order_id,
+              subeventId: subevent.subevent_id,
+            });
+
+            if (!qrData || !qrData.data || !qrData.image) {
+              throw new ApiError(500, "Failed to generate QR code");
+            }
+
+            const issuedPass = await IssuedPass.create({
+              pass_id: item.pass.pass_id,
+              attendee_id: attendee.attendee_id,
+              subevent_id: subevent.subevent_id,
+              admin_id: order.admin_id,
+              transaction_id: transaction.transaction_id,
+              order_item_id: item.order_item_id,
+              is_expired: false,
+              issued_date: new Date(),
+              expiry_date: expiryDate,
+              booking_number: null,
+              status: "active",
+              used_count: 0,
+              qr_data: qrData.data,
+              qr_image: qrData.image,
+              sponsored_pass: false,
+            });
+
+            return {
+              subeventName: subevent.name,
+              expiryDate,
+              qrImage: qrData.image,
+            };
+          })
+        );
+        await sendMail(attendee.email, "issuedPassMultiDay", {
+          attendee,
+          passes: issuedPassDetails.map((pass, i) => ({
+            ...pass,
+            day: subevents[i]?.day || i + 1,
+          })),
+          passCategory: item.pass.category,
+          orderNumber: order_id,
+        });
+      })
+    );
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          {},
+          "Global passes issued and emails sent successfully"
+        )
+      );
+  } catch (error) {
+    console.error(error);
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
+export {
+  createBillingUser,
+  createOrderForBillingUser,
+  issuePassToAttendees,
+  issueGlobalPassToAttendees,
+};

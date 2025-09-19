@@ -14,6 +14,7 @@ import IssuedPass from "./issuedpass.model.js";
 import CheckingRecord from "./checkin.record.model.js";
 import PassSubEvent from "./pass.subevent.model.js";
 import EventBillingUsers from "./eventBillingUser.model.js";
+import SubEventAttendee from "./subEventAttendee.model.js";
 // Define associations
 const defineAssociations = () => {
   // ==================== ADMIN RELATIONSHIPS ====================
@@ -224,18 +225,21 @@ const defineAssociations = () => {
     onUpdate: "CASCADE",
   });
 
-  // ==================== SUBEVENT → ATTENDEE (One-to-Many) ====================
-
-  SubEvent.hasMany(Attendee, {
+  // SubEvent ↔ Attendee many-to-many through SubEventAttendee
+  SubEvent.belongsToMany(Attendee, {
+    through: SubEventAttendee,
     foreignKey: "subevent_id",
+    otherKey: "attendee_id",
     as: "attendees",
     onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });
 
-  Attendee.belongsTo(SubEvent, {
-    foreignKey: "subevent_id",
-    as: "subevent",
+  Attendee.belongsToMany(SubEvent, {
+    through: SubEventAttendee,
+    foreignKey: "attendee_id",
+    otherKey: "subevent_id",
+    as: "subevents",
     onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });

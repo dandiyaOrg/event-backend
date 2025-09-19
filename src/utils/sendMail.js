@@ -56,6 +56,39 @@ const emailTypeMap = {
         admin,
       }),
   },
+  issuedPass: {
+    from: appEmails.sendTicket,
+    subject: "Your Event Pass Details",
+    template: ({
+      attendee,
+      qrImage,
+      passCategory,
+      orderNumber,
+      subeventName,
+      expiryDate,
+    }) =>
+      emailTemplates.issuedPassEmail({
+        attendee,
+        qrImage,
+        passCategory,
+        orderNumber,
+        subeventName,
+        expiryDate,
+        title: "Your Event Pass",
+      }),
+  },
+  issuedPassMultiDay: {
+    from: appEmails.sendTicket,
+    subject: "Your Multi-Day Event Passes",
+    template: ({ attendee, passes, passCategory, orderNumber }) =>
+      emailTemplates.issuedPassMultiDayEmail({
+        attendee,
+        passes, // array with day, subeventName, expiryDate, qrImage
+        passCategory,
+        orderNumber,
+        title: "Your Multi-Day Event Passes",
+      }),
+  },
 };
 
 const sendMail = async (

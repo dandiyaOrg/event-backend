@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   createBillingUser,
   createOrderForBillingUser,
+  issuePassToAttendees,
 } from "../controllers/billingUser.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -18,3 +19,5 @@ router
 router
   .route("/order/create")
   .post(validateBody(createOrderSchema), createOrderForBillingUser);
+
+router.route("/issue-passes").post(issuePassToAttendees);

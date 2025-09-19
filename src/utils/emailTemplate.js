@@ -286,6 +286,115 @@ const eventRegistrationEmail = ({
   </div>
   `;
 };
+
+const issuedPassEmail = ({
+  attendee = {},
+  qrImage = "",
+  passCategory = "",
+  orderNumber = "",
+  subeventName = "",
+  expiryDate = null,
+  title = "Your Event Pass",
+}) => {
+  const expiryText = expiryDate
+    ? `<p style="font-size:14px; color:#dc3545; font-weight:bold;">
+         Note: Your pass expires on ${new Date(expiryDate).toLocaleDateString()}.
+       </p>`
+    : "";
+
+  return `
+  <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:40px;">
+    <div style="max-width:420px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:32px 28px;">
+      <div style="text-align:center; margin-bottom: 24px;">
+        <img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" alt="Event Pass" style="width:60px;height:60px;margin-bottom:14px;" />
+        <h2 style="font-size:22px;font-weight:700;margin:0;color:#212529;">${title}</h2>
+        <p style="color:#6c757d;font-size:14px;">Order #: ${orderNumber}</p>
+      </div>
+      <p style="font-size:15px;margin:16px 0 8px 0;line-height:1.5;">
+        Hello <b>${attendee.name || "Attendee"}</b>,
+      </p>
+      <p style="font-size:15px;color:#43484d;line-height:1.5;margin-bottom:18px;">
+        Thank you for booking. Please find your pass details below:
+      </p>
+      <ul style="font-size:15px; color:#212529; padding-left:20px; margin-bottom:20px;">
+        <li><b>Pass Category:</b> ${passCategory}</li>
+        <li><b>Event / Subevent:</b> ${subeventName}</li>
+        ${expiryText}
+      </ul>
+      <div style="text-align:center;margin:30px 0;">
+        <img src="${qrImage}" alt="QR Code" style="width:200px; height:200px; border:1px solid #ddd; border-radius:8px;" />
+      </div>
+      <p style="font-size:13px;color:#747a80;line-height:1.6;margin:20px 0 0 0;">
+        Please present this QR code at the event check-in.
+      </p>
+      <hr style="margin:16px 0;border-top:1px solid #ececec;" />
+      <div style="font-size:13px;color:#444;margin-top:13px; text-align:center;">
+        Thank you for being with us!<br/>
+        &copy; ${new Date().getFullYear()} Your Organization Name
+      </div>
+    </div>
+  </div>
+  `;
+};
+
+const issuedPassMultiDayEmail = ({
+  attendee = {},
+  passes = [], // Array of { subeventName, expiryDate, qrImage, day }
+  passCategory = "",
+  orderNumber = "",
+  title = "Your Multi-Day Event Passes",
+}) => {
+  // Build QR code sections grouped by day/subevent
+  const qrSectionsHtml = passes
+    .sort((a, b) => a.day - b.day) // Just in case, sort by day
+    .map(
+      (pass) => `
+    <tr>
+      <td style="padding:20px; border-bottom:2px solid #f0f0f0;">
+        <h3 style="margin:0 0 8px 0; font-size:18px; color:#212529;">
+          Day ${pass.day}: ${pass.subeventName}
+        </h3>
+        <p style="margin:0 0 12px 0; font-size:14px; color:#6c757d;">
+          Expiry: ${new Date(pass.expiryDate).toLocaleDateString()}
+        </p>
+        <img src="${pass.qrImage}" alt="QR Code Day ${pass.day}" style="width:180px; height:180px; border:1px solid #ddd; border-radius:8px;" />
+      </td>
+    </tr>
+  `
+    )
+    .join("\n");
+
+  return `
+  <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:40px;">
+    <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:32px 28px;">
+      <div style="text-align:center; margin-bottom:24px;">
+        <h2 style="font-size:22px; font-weight:700; margin:0; color:#212529;">${title}</h2>
+        <p style="color:#6c757d; font-size:14px;">Order #: ${orderNumber}</p>
+      </div>
+      <p style="font-size:15px; margin:16px 0 8px 0; line-height:1.5;">
+        Hello <b>${attendee.name || "Attendee"}</b>,
+      </p>
+      <p style="font-size:15px; color:#43484d; line-height:1.5; margin-bottom:20px;">
+        Thank you for your booking. Below are your passes for each event day:
+      </p>
+      
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        ${qrSectionsHtml}
+      </table>
+
+      <p style="font-size:13px; color:#747a80; line-height:1.6; margin:30px 0 0 0; text-align:center;">
+        Please present the QR code(s) at the event check-in each day.
+      </p>
+      <hr style="margin:24px 0; border-top:1px solid #ececec;" />
+      <div style="font-size:13px; color:#444; margin-top:13px; text-align:center;">
+        Thank you for joining us!<br />
+        &copy; ${new Date().getFullYear()} Your Organization Name
+      </div>
+    </div>
+  </div>
+  `;
+};
+
 export {
   adminOtpLoginEmail,
   emailVerfication,
@@ -294,4 +403,6 @@ export {
   employeeRegistrationEmail,
   employeeCredentialsUpdateEmail,
   eventRegistrationEmail,
+  issuedPassEmail,
+  issuedPassMultiDayEmail,
 };
