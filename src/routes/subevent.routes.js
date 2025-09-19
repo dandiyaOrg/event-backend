@@ -24,6 +24,7 @@ router
   .route("/register")
   .post(upload.single("image"), validateBody(subEventSchema), createSubEvent);
 
+// there shouldn't be any option to delete subevent when event is active
 router
   .route("/:subeventId")
   .get(getSubEventById)
