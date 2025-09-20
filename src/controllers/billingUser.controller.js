@@ -1,6 +1,8 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
+import { sequelize } from "../db/models/index.js";
+import { Op } from "sequelize";
 import {
   BillingUser,
   Event,
@@ -14,6 +16,7 @@ import {
   Attendee,
   Transaction,
   IssuedPass,
+  EventBillingUsers,
 } from "../db/models/index.js";
 
 import sendMail from "../utils/sendMail.js";
@@ -87,7 +90,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       // 2. Validate global pass existence and active status
       // Option 1: Use the pass_id provided in body (recommended)
       const pass = await Pass.findOne({
-        where: { pass_id, is_active: true, is_global: true, event_id },
+        where: { pass_id, is_active: true, is_global: true },
         transaction: t,
       });
       if (!pass) {
@@ -116,6 +119,16 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           event_id,
           admin_id: event.admin_id,
           total_amount: calculatedTotal,
+        },
+        { transaction: t }
+      );
+      // -- working fine till this
+      // TODO :: create_event_billing_user
+      const EventBillingUser = await EventBillingUsers.create(
+        {
+          billing_user_id,
+          event_id,
+          order_id: order.order_id,
         },
         { transaction: t }
       );
@@ -185,25 +198,18 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
             )
           );
         }
-        // Check for existing issued pass
-        await OrderItemAttendee.create(
-          {
-            order_item_id: orderItem.order_item_id,
-            attendee_id: attendee.attendee_id,
-            assigned_date: new Date(),
-          },
-          { transaction: t }
-        );
 
-        // Link attendee to order item
-        await OrderItemAttendee.create(
-          {
+        
+        await OrderItemAttendee.findOrCreate({
+          where: {
             order_item_id: orderItem.order_item_id,
             attendee_id: attendee.attendee_id,
+          },
+          defaults: {
             assigned_date: new Date(),
           },
-          { transaction: t }
-        );
+          transaction: t,
+        });
       }
 
       await t.commit();
@@ -310,6 +316,15 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       { transaction: t }
     );
 
+    const event_billing_user = await EventBillingUsers.create(
+      {
+        billing_user_id,
+        event_id: subevent.event_id,
+        order_id: order.order_id,
+      },
+      { transaction: t }
+    );
+
     // 5. Create OrderItems grouped by pass_id
     const orderItemsMap = new Map();
     for (const [passId, qty] of passQtyMap.entries()) {
@@ -410,6 +425,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
   }
 });
 
+// check the issue-- multiple time pass issued  and booking number
 const issuePassToAttendees = asyncHandler(async (req, res, next) => {
   try {
     const { order_id } = req.body;
@@ -534,6 +550,18 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
                 "Failed to generate QR code",
                 qrData?.error
               );
+            }
+
+            // check issued pass already exits or not
+            const checkPassExist = await IssuedPass.findOne({
+              where: {
+                pass_id,
+                attendee_id: attendee.attendee_id,
+                order_item_id,
+              },
+            });
+            if (checkPassExist) {
+              return new ApiError(400, `Pass is Already issued`);
             }
             const issuedPass = await IssuedPass.create({
               pass_id,
@@ -699,6 +727,17 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               );
             }
 
+            const existingPass = await IssuedPass.findOne({
+              where: {
+                pass_id: item.pass.pass_id,
+                attendee_id: attendee.attendee_id,
+                subevent_id: subevent.subevent_id,
+                order_item_id: item.order_item_id,
+              },
+            });
+            if(existingPass){
+              return new ApiError(400, `Pass is Already issued`);
+            }
             const issuedPass = await IssuedPass.create({
               pass_id: item.pass.pass_id,
               attendee_id: attendee.attendee_id,

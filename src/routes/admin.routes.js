@@ -7,6 +7,8 @@ import {
   verifyOTPForLogin,
   verifyOTPForPasswordReset,
   getAdminDetails,
+  getBillingUserToAdminId,
+  GetAllBillingUserToEvnt
 } from "../controllers/admin.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -38,5 +40,10 @@ router
 router
   .route("/register")
   .post(validateBody(adminRegisterSchema), registerAdmin);
+
+  // verify jwt
+router.use(verifyJWT);
+router.route("/BillingUser").get(getBillingUserToAdminId);
+router.route("event/BillingUser").get(GetAllBillingUserToEvnt);
 
 export default router;

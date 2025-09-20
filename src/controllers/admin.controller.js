@@ -1,7 +1,7 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { Admin } from "../db/models/index.js";
+import { Admin, BillingUser ,EventBillingUsers } from "../db/models/index.js";
 import { Op } from "sequelize";
 import sendMail from "../utils/sendMail.js";
 
@@ -258,6 +258,53 @@ const getAdminDetails = asyncHandler(async (req, res, next) => {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
+
+const getBillingUserToAdminId = asyncHandler(async (req, res, next) => {
+  try {
+    const admin_id = req.admin_id;
+
+    // Find all the billing users corresponding to that admin_id
+    const allBillingUsers = await BillingUser.findAll({
+      where: { admin_id },
+    });
+
+    if (!allBillingUsers || allBillingUsers.length === 0) {
+      return res.status(404).json(new ApiResponse(200, allBillingUsers, "No Billing User Found Corresponding to this Admin_Id"));
+    }
+
+    return res.status(200).json(new ApiResponse(200, allBillingUsers, "Data of all the Billing User"));
+  } catch (error) {
+    next(new ApiError(500, "Internal Server Error"));
+  }
+});
+
+
+// get all the billing user corresponding to the event 
+
+const GetAllBillingUserToEvnt = asyncHandler(async (req, res, next) => {
+  try {
+    const { event_id } = req.query;
+
+    if (!event_id) {
+      return next(new ApiError(404, "Required EventId"));
+    }
+
+    const billingUsers = await EventBillingUsers.findAll({
+      where: { event_id },
+    });
+
+    if (billingUsers.length === 0) {
+      return next(new ApiError(404, "No Billing UserCorresponding to the EvrntId"));
+    }
+
+    return res.status(200).json(new ApiResponse(201, {billingUsers}, "Password updated successfully"));
+  } catch (error) {
+    console.error(error);
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
+
 export {
   loginWithEmail,
   refreshAccessToken,
@@ -266,4 +313,6 @@ export {
   verifyOTPForLogin,
   getAdminDetails,
   verifyOTPForPasswordReset,
+  getBillingUserToAdminId,
+  GetAllBillingUserToEvnt
 };

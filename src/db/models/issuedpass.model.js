@@ -108,14 +108,14 @@ const IssuedPass = sequelize.define(
       },
     },
     qr_image: {
-      type: DataTypes.TEXT, // Store QR code image URL or base64
+      type: DataTypes.TEXT,
       allowNull: false,
       validate: {
         notEmpty: true,
       },
     },
     qr_data: {
-      type: DataTypes.TEXT, // Store QR code data for verification
+      type: DataTypes.TEXT,
       allowNull: false,
       validate: {
         notEmpty: true,
@@ -156,40 +156,24 @@ const IssuedPass = sequelize.define(
       useIdentity: true,
     },
     indexes: [
-      {
-        fields: ["attendee_id"],
-      },
-      {
-        fields: ["subevent_id"],
-      },
-      {
-        fields: ["booking_number"],
-        unique: true,
-      },
-      {
-        fields: ["status"],
-      },
-      {
-        fields: ["is_expired"],
-      },
-      {
-        fields: ["expiry_date"],
-      },
-      {
-        fields: ["order_item_id"],
-      },
+      { fields: ["attendee_id"] },
+      { fields: ["subevent_id"] },
+      { fields: ["booking_number"], unique: true },
+      { fields: ["status"] },
+      { fields: ["is_expired"] },
+      { fields: ["expiry_date"] },
+      { fields: ["order_item_id"] },
     ],
     hooks: {
-      beforeValidate: (issuedPass, options) => {
+      // ✅ Run before validation (fix for booking_number)
+      beforeValidate: async (issuedPass) => {
         if (issuedPass.sponsored_pass) {
           issuedPass.order_item_id = null;
         } else if (!issuedPass.order_item_id) {
           throw new Error("Non-sponsored pass requires order_item_id");
         }
-      },
-      beforeCreate: async (issuedPass, options) => {
+
         if (!issuedPass.booking_number) {
-          // Get the next booking number
           const lastPass = await IssuedPass.findOne({
             order: [["booking_number", "DESC"]],
             attributes: ["booking_number"],
@@ -198,11 +182,12 @@ const IssuedPass = sequelize.define(
           const nextBookingNumber = lastPass
             ? lastPass.booking_number + 1
             : 1000;
+
           issuedPass.booking_number = nextBookingNumber;
         }
       },
-      beforeUpdate: (issuedPass, options) => {
-        // Auto-expire if expiry date is passed
+
+      beforeUpdate: (issuedPass) => {
         if (
           issuedPass.expiry_date &&
           new Date() > new Date(issuedPass.expiry_date)
