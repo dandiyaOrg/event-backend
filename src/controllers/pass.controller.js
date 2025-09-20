@@ -1,7 +1,8 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { Pass, SubEvent, PassSubEvent } from "../db/models/index.js";
+import { Pass, SubEvent, PassSubEvent, Event } from "../db/models/index.js";
+import { Op } from "sequelize";
 
 const createNewPass = asyncHandler(async (req, res, next) => {
   try {
@@ -16,7 +17,16 @@ const createNewPass = asyncHandler(async (req, res, next) => {
       is_active,
     } = req.body;
 
-    if (is_global && is_global === true) {
+    const isGlobalBool =
+      typeof is_global === "boolean"
+        ? is_global
+        : is_global !== undefined && is_global !== null
+          ? typeof is_global === "string"
+            ? is_global.toLowerCase() === "true"
+            : Boolean(is_global)
+          : false;
+
+    if (isGlobalBool) {
       if (!event_id) {
         return next(
           new ApiError(400, "event_id is required when is_global is true")

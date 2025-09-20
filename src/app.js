@@ -5,6 +5,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
 import winston from "winston";
+import { checkClientToken } from "../src/middlewares/req.middleware.js";
 import "winston-daily-rotate-file";
 
 import { errHandler } from "./middlewares/err.middleware.js";
@@ -42,9 +43,28 @@ const morganStream = {
   },
 };
 
+const raw = process.env.CORS_ORIGIN || "";
+const allowedOrigins = raw
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// helper to check origin - allow requests without an origin (native apps, curl)
+function isOriginAllowed(origin) {
+  if (!origin) return true; // allow no-origin requests (mobile/native/backend-to-backend)
+  if (allowedOrigins.length === 0) return true; // permissive if no config (change for prod!)
+  return allowedOrigins.includes(origin);
+}
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN,
-  credentials: true,
+  origin: function (origin, callback) {
+    if (isOriginAllowed(origin)) {
+      // note: if origin is falsy (mobile/native), this will still pass and not set an Origin header
+      callback(null, true);
+    } else {
+      callback(new Error("CORS policy: Origin not allowed"), false);
+    }
+  },
+  credentials: true, // required if you use cookies or credentials
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -54,8 +74,19 @@ const corsOptions = {
     "Cache-Control",
     "refreshToken",
     "x-admin-id",
+    "x-api-key",
   ],
+  exposedHeaders: ["accessToken", "refreshToken", "X-Client-Token"], // instruct browsers which headers to expose to JS
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  optionsSuccessStatus: 204,
+  maxAge: 86400, // 24 hours for preflight cache
 };
+
+app.use((req, res, next) => {
+  // Ensure caches/proxies differentiate per-origin
+  res.header("Vary", "Origin");
+  next();
+});
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 app.use((req, res, next) => {
@@ -98,6 +129,7 @@ import billingUserRoutes from "./routes/billingUser.routes.js";
 import healthRoutes from "./routes/health.routes.js";
 app.use("/_health", healthRoutes); // endpoints: /_health/health, /_health/ready, /_health/live
 
+app.use(checkClientToken);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/event", eventRoutes);
 app.use("/api/v1/employee", employeeRoutes);

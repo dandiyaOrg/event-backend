@@ -67,7 +67,7 @@ const createEmployee = asyncHandler(async (req, res, next) => {
         password: decryptedpassword,
       }
     );
-    if (!emailData || !emailData.id) {
+    if (!emailData) {
       return next(
         new ApiError(502, "Failed to employee registration email", error)
       );
@@ -223,7 +223,7 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
           password: decryptedpassword ?? "",
         }
       );
-      if (!emailData || !emailData.id) {
+      if (!emailData) {
         return next(
           new ApiError(502, "Failed to send credentials update email", error)
         );
