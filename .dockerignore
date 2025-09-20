@@ -1,0 +1,37 @@
+# Ignore node modules (don't copy local modules)
+node_modules
+
+# Ignore logs and debugging files
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Ignore Docker and git files
+Dockerfile
+.dockerignore
+.git
+.gitignore
+
+# Ignore environment variables and config for safety
+.env
+.env.local
+.env.*.local
+
+# Ignore IDE/editor directories and files
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Ignore test coverage output
+coverage
+
+# Ignore build output for separate frontends or dist folders
+dist
+build
+
+# Ignore any temporary files
+*.tmp
+*.log

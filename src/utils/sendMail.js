@@ -1,11 +1,11 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import * as emailTemplates from "./emailTemplate.js";
 
 const appEmails = {
-  sendOTP: "verify@rksahyog.com",
-  sendTicket: "booking@rksahyog.com",
-  info: "info@rksahyog.com",
-  support: "support@rksahyog.com",
+  sendOTP: "verify@rkgarbanight.com",
+  sendTicket: "booking@rkgarbanight.com",
+  info: "info@rkgarbanight.com",
+  support: "support@rkgarbanight.com",
 };
 
 const emailTypeMap = {
@@ -91,12 +91,21 @@ const emailTypeMap = {
   },
 };
 
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: process.env.SMTP_SECURE === "true",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
 const sendMail = async (
   to,
   type = "sendVerificationOTP",
   templateData = {}
 ) => {
-  const resend = new Resend(process.env.RESEND_API);
   const emailConfig = emailTypeMap[type];
 
   if (!emailConfig) {
@@ -108,16 +117,20 @@ const sendMail = async (
       ? await emailConfig.template(templateData)
       : emailConfig.template;
 
-  const { data, error } = await resend.emails.send({
-    from: emailConfig.from,
-    to: Array.isArray(to) ? to : [to],
-    subject: emailConfig.subject,
-    html,
-  });
-  if (error) {
+  try {
+    const info = await transporter.sendMail({
+      from: emailConfig.from || process.env.SMTP_USER,
+      to: Array.isArray(to) ? to.join(",") : to,
+      subject: emailConfig.subject,
+      html,
+    });
+
+    console.log("Message sent: %s", info.messageId);
+    return { emailData: info, error: null };
+  } catch (error) {
     console.error("Error sending email:", error);
+    return { emailData: null, error };
   }
-  return { emailData: data, error };
 };
 
 export default sendMail;

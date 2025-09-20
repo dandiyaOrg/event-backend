@@ -1,0 +1,117 @@
+version: "3.8"
+services:
+  traefik:
+    image: traefik:v2.10
+    restart: unless-stopped
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      - "--certificatesResolvers.le.acme.httpChallenge.entryPoint=web"
+      - --certificatesResolvers.le.acme.email=${LETSENCRYPT_EMAIL} # replace or use env
+      - "--certificatesResolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--api.insecure=false" # dashboard not exposed publicly by default
+      - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entryPoints.web.http.redirections.entrypoint.permanent=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${LETSENCRYPT_DIR:-./letsencrypt}:/letsencrypt
+    networks:
+      - web
+  frontend:
+    image: nginx:alpine
+    # Serve the built static files (put your frontend build into ./event-frontend/build)
+    volumes:
+      - ./user-frontend/dist:/usr/share/nginx/html:ro
+      - ./user-frontend/nginx.conf:/etc/nginx/nginx.conf:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=le"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      # Optional: enable gzip/compression via Traefik middlewares or nginx config
+    networks:
+      - web
+
+  admin_frontend:
+    image: nginx:alpine
+    volumes:
+      - ./admin-frontend/dist:/usr/share/nginx/html:ro
+      - ./admin-frontend/src/nginx.conf:/etc/nginx/nginx.conf:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin.rule=Host(`admin.${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.admin.entrypoints=websecure"
+      - "traefik.http.routers.admin.tls.certresolver=le"
+      - "traefik.http.services.admin.loadbalancer.server.port=80"
+    networks:
+      - web
+  backend:
+    depends_on:
+      - postgres
+    build:
+      context: ./event-backend
+      dockerfile: Dockerfile
+    image: rkevent/event-backend:latest
+    labels:
+      - "traefik.enable=true"
+      # Router matches example.com + path prefix /api/v1 and sends to backend service
+      - "traefik.http.routers.backend.rule=Host(`${MAIN_DOMAIN}`) && PathPrefix(`/api/v1`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=le"
+      - "traefik.http.services.backend.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.security-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.security-headers.headers.browserXssFilter=true"
+      - 'traefik.http.middlewares.cors.headers.accessControlAllowOriginList=["https://${MAIN_DOMAIN}","https://admin.${MAIN_DOMAIN}"]'
+      - "traefik.http.middlewares.cors.headers.accessControlAllowMethods=GET,OPTIONS,PUT,POST,DELETE"
+      - "traefik.http.middlewares.cors.headers.accessControlAllowHeaders=Content-Type,Authorization"
+      - "traefik.http.middlewares.cors.headers.accessControlAllowCredentials=true"
+      - "traefik.http.middlewares.cors.headers.accessControlMaxAge=100"
+      # attach middlewares to router
+      - "traefik.http.routers.backend.middlewares=security-headers,cors"
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:3000/_health/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - web
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./local_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - web
+
+networks:
+  web:
+    driver: bridge

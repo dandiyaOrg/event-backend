@@ -109,14 +109,14 @@ const IssuedPass = sequelize.define(
     },
     qr_image: {
       type: DataTypes.TEXT, // Store QR code image URL or base64
-      allowNull: false,
+      allowNull: true,
       validate: {
         notEmpty: true,
       },
     },
     qr_data: {
       type: DataTypes.TEXT, // Store QR code data for verification
-      allowNull: false,
+      allowNull: true,
       validate: {
         notEmpty: true,
       },
@@ -180,16 +180,14 @@ const IssuedPass = sequelize.define(
       },
     ],
     hooks: {
-      beforeValidate: (issuedPass, options) => {
+      beforeValidate: async (issuedPass) => {
         if (issuedPass.sponsored_pass) {
           issuedPass.order_item_id = null;
         } else if (!issuedPass.order_item_id) {
           throw new Error("Non-sponsored pass requires order_item_id");
         }
-      },
-      beforeCreate: async (issuedPass, options) => {
+
         if (!issuedPass.booking_number) {
-          // Get the next booking number
           const lastPass = await IssuedPass.findOne({
             order: [["booking_number", "DESC"]],
             attributes: ["booking_number"],
@@ -201,7 +199,7 @@ const IssuedPass = sequelize.define(
           issuedPass.booking_number = nextBookingNumber;
         }
       },
-      beforeUpdate: (issuedPass, options) => {
+      beforeUpdate: (issuedPass) => {
         // Auto-expire if expiry date is passed
         if (
           issuedPass.expiry_date &&

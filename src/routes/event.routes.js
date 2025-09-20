@@ -17,29 +17,29 @@ import {
   eventUpdateSchema,
   updateEventStatusSchema,
 } from "../utils/schemaValidation.js";
+import { logger } from "../app.js";
 
 const router = Router();
 
 router.route("/details/subevents").post(getAllSubeventsWithPasses);
 router.route("/details/global").post(getGlobalPassForEvent);
 
-router.use(verifyJWT);
-
 router
   .route("/register")
   .post(
     upload.single("image"),
     validateBody(eventRegisterSchema),
+    verifyJWT,
     registerEvent
   );
 // Get events by admin
-router.route("/all").get(getAllEventByAdmin);
+router.route("/all").get(verifyJWT,getAllEventByAdmin);
 // CRUD operations by ID (generic)
 router
   .route("/:eventId")
-  .delete(deleteEvent)
-  .get(getEventDetailById)
-  .put(upload.single("image"), validateBody(eventUpdateSchema), updateEvent);
+  .delete(verifyJWT,deleteEvent)
+  .get(verifyJWT,getEventDetailById)
+  .put(upload.single("image"), validateBody(eventUpdateSchema),verifyJWT, updateEvent);
 
 router
   .route("/:eventId/status")

@@ -14,7 +14,10 @@ import {
   Attendee,
   Transaction,
   IssuedPass,
+  sequelize,
+  EventBillingUsers,
 } from "../db/models/index.js";
+import { Op } from "sequelize";
 
 import sendMail from "../utils/sendMail.js";
 import { generateQR } from "../services/qrGenerator.service.js";
@@ -87,7 +90,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       // 2. Validate global pass existence and active status
       // Option 1: Use the pass_id provided in body (recommended)
       const pass = await Pass.findOne({
-        where: { pass_id, is_active: true, is_global: true, event_id },
+        where: { pass_id, is_active: true, is_global: true },
         transaction: t,
       });
       if (!pass) {
@@ -120,6 +123,17 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         { transaction: t }
       );
 
+      const EventBillingUser = await EventBillingUsers.create(
+        {
+          billing_user_id,
+          event_id,
+          order_id: order.order_id,
+        },
+        { transaction: t }
+      );
+      if (!EventBillingUser) {
+        return next(new ApiError(400, "Failed to Create EventBillingUser"));
+      }
       // 5. Create single OrderItem for the global pass
       const orderItem = await OrderItem.create(
         {
@@ -185,25 +199,16 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
             )
           );
         }
-        // Check for existing issued pass
-        await OrderItemAttendee.create(
-          {
+        await OrderItemAttendee.findOrCreate({
+          where: {
             order_item_id: orderItem.order_item_id,
             attendee_id: attendee.attendee_id,
+          },
+          defaults: {
             assigned_date: new Date(),
           },
-          { transaction: t }
-        );
-
-        // Link attendee to order item
-        await OrderItemAttendee.create(
-          {
-            order_item_id: orderItem.order_item_id,
-            attendee_id: attendee.attendee_id,
-            assigned_date: new Date(),
-          },
-          { transaction: t }
-        );
+          transaction: t,
+        });
       }
 
       await t.commit();
@@ -310,6 +315,17 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       { transaction: t }
     );
 
+    const event_billing_user = await EventBillingUsers.create(
+      {
+        billing_user_id,
+        event_id: subevent.event_id,
+        order_id: order.order_id,
+      },
+      { transaction: t }
+    );
+    if (!event_billing_user) {
+      return next(new ApiError(400, "Failed to create event billing user"));
+    }
     // 5. Create OrderItems grouped by pass_id
     const orderItemsMap = new Map();
     for (const [passId, qty] of passQtyMap.entries()) {
@@ -470,9 +486,8 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
         const pass_id = item.pass_id;
 
         if (!item.pass) {
-          throw new ApiError(
-            400,
-            `Pass not found for order item ${order_item_id}`
+          return next(
+            new ApiError(400, `Pass not found for order item ${order_item_id}`)
           );
         }
 
@@ -482,7 +497,9 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
           attributes: ["subevent_id"],
         });
         if (!passSubEvents.length) {
-          throw new ApiError(400, `No subevents linked with pass ${pass_id}`);
+          return next(
+            new ApiError(400, `No subevents linked with pass ${pass_id}`)
+          );
         }
         const subeventIds = passSubEvents.map((pse) => pse.subevent_id);
         const subevents = await SubEvent.findAll({
@@ -490,7 +507,9 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
           attributes: ["subevent_id", "date", "name"],
         });
         if (!subevents.length) {
-          throw new ApiError(400, `SubEvents not found for pass ${pass_id}`);
+          return next(
+            new ApiError(400, `SubEvents not found for pass ${pass_id}`)
+          );
         }
 
         // For simplicity, pick the first subevent for expiry and email context
@@ -511,9 +530,11 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
         });
 
         if (!orderItemAttendees.length) {
-          throw new ApiError(
-            400,
-            `No attendees found for order item ${order_item_id}`
+          return next(
+            new ApiError(
+              400,
+              `No attendees found for order item ${order_item_id}`
+            )
           );
         }
         await Promise.all(
@@ -521,19 +542,16 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
             const attendee = oia.attendee;
             if (!attendee) return;
 
-            const qrData = await generateQR({
-              attendeeId: attendee.attendee_id,
-              passId: pass_id,
-              orderItemId: order_item_id,
-              orderId: order_id,
+            // check issued pass already exits or not
+            const checkPassExist = await IssuedPass.findOne({
+              where: {
+                pass_id,
+                attendee_id: attendee.attendee_id,
+                order_item_id,
+              },
             });
-
-            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
-              throw new ApiError(
-                500,
-                "Failed to generate QR code",
-                qrData?.error
-              );
+            if (checkPassExist) {
+              return new ApiError(400, `Pass is Already issued`);
             }
             const issuedPass = await IssuedPass.create({
               pass_id,
@@ -548,11 +566,26 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               booking_number: null,
               status: "active",
               used_count: 0,
-              qr_data: qrData.data,
-              qr_image: qrData.image,
+              qr_data: null,
+              qr_image: null,
               sponsored_pass: false,
             });
 
+            const qrData = await generateQR({
+              orderItemId: order_item_id,
+              orderId: order_id,
+              issuePass_Id: issuedPass.issued_pass_id,
+            });
+
+            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              return next(
+                new ApiError(500, "Failed to generate QR code", qrData?.error)
+              );
+            }
+            await issuedPass.update({
+              qr_data: qrData.data,
+              qr_image: qrData.image,
+            });
             await sendMail(attendee.email, "issuedPass", {
               attendee,
               qrImage: qrData?.image,
@@ -629,9 +662,11 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
     });
 
     if (!passSubEvents.length) {
-      throw new ApiError(
-        400,
-        `No subevents linked with global pass ${item.pass.pass_id}`
+      return next(
+        new ApiError(
+          400,
+          `No subevents linked with global pass ${item.pass.pass_id}`
+        )
       );
     }
 
@@ -683,20 +718,16 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               999
             );
 
-            const qrData = await generateQR({
-              attendeeId: attendee.attendee_id,
-              passId: item.pass.pass_id,
-              orderItemId: item.order_item_id,
-              orderId: order_id,
-              subeventId: subevent.subevent_id,
+            const existingPass = await IssuedPass.findOne({
+              where: {
+                pass_id: item.pass.pass_id,
+                attendee_id: attendee.attendee_id,
+                subevent_id: subevent.subevent_id,
+                order_item_id: item.order_item_id,
+              },
             });
-
-            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
-              throw new ApiError(
-                500,
-                "Failed to generate QR code",
-                qrData?.error
-              );
+            if (existingPass) {
+              return new ApiError(400, `Pass is Already issued`);
             }
 
             const issuedPass = await IssuedPass.create({
@@ -712,9 +743,29 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               booking_number: null,
               status: "active",
               used_count: 0,
+              qr_data: null,
+              qr_image: null,
+              sponsored_pass: false,
+            });
+
+            // Generate QR
+            const qrData = await generateQR({
+              orderItemId: item.order_item_id,
+              orderId: order_id,
+              subeventId: subevent.subevent_id,
+              issuePass_Id: issuedPass.issued_pass_id,
+            });
+
+            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              next(
+                new ApiError(500, "Failed to generate QR code", qrData?.error)
+              );
+            }
+
+            // Update issued pass with QR data
+            await issuedPass.update({
               qr_data: qrData.data,
               qr_image: qrData.image,
-              sponsored_pass: false,
             });
 
             return {

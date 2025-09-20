@@ -31,3 +31,5 @@ router
 
 router.route("/issue-passes").post(issuePassToAttendees);
 router.route("/issue-global-passes").post(issueGlobalPassToAttendees);
+
+export default router;

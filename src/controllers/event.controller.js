@@ -117,7 +117,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
         event: updatedEvent,
       }
     );
-    if (!emailData || !emailData.id) {
+    if (!emailData) {
       return next(
         new ApiError(502, "Failed to send credentials update email", error)
       );

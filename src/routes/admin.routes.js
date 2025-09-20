@@ -7,6 +7,9 @@ import {
   verifyOTPForLogin,
   verifyOTPForPasswordReset,
   getAdminDetails,
+  getAllBillingUserForEvent,
+  getBillingUsersForAdmin,
+  getTransactionsForAdmin,
 } from "../controllers/admin.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -39,4 +42,10 @@ router
   .route("/register")
   .post(validateBody(adminRegisterSchema), registerAdmin);
 
+router.route("/billingUsers").get(verifyJWT, getBillingUsersForAdmin);
+router
+  .route("/event/billingUsers/:eventId")
+  .get(verifyJWT, getAllBillingUserForEvent);
+
+router.route("/transactions").get(verifyJWT, getTransactionsForAdmin);
 export default router;
