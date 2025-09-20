@@ -18,7 +18,7 @@ import {
   IssuedPass,
   EventBillingUsers,
 } from "../db/models/index.js";
-
+import { logger } from "../app.js";
 import sendMail from "../utils/sendMail.js";
 import { generateQR } from "../services/qrGenerator.service.js";
 
@@ -26,10 +26,15 @@ const createBillingUser = asyncHandler(async (req, res, next) => {
   try {
     const { name, mobile_no, whatsapp, email, address, dob, gender, event_id } =
       req.body;
+
+    logger.debug(`createBillingUser request received with event_id: ${event_id}, email: ${email}`);
+
     const normalizedEmail = email.toLowerCase().trim();
     const normalizedMobile = String(mobile_no).trim();
+
     const event = await Event.findByPk(event_id);
     if (!event) {
+      logger.warn(`Event not found for event_id: ${event_id}`);
       return next(
         new ApiError(
           400,
@@ -37,9 +42,11 @@ const createBillingUser = asyncHandler(async (req, res, next) => {
         )
       );
     }
+
     let billingUser = await BillingUser.findOne({
       where: { mobile_no: normalizedMobile, email: normalizedEmail },
     });
+
     if (!billingUser) {
       billingUser = await BillingUser.create({
         name,
@@ -51,10 +58,16 @@ const createBillingUser = asyncHandler(async (req, res, next) => {
         gender,
         admin_id: event.admin_id,
       });
+      logger.info(`Billing user created successfully with email: ${normalizedEmail}`);
+    } else {
+      logger.info(`Billing user already exists with email: ${normalizedEmail}`);
     }
+
     if (!billingUser) {
+      logger.error(`Failed to create billing user for email: ${normalizedEmail}`);
       return next(new ApiError(500, "Failed to create billingUser"));
     }
+
     return res
       .status(200)
       .json(
@@ -65,14 +78,18 @@ const createBillingUser = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
+    logger.error("Internal Server Error in createBillingUser", { stack: error.stack });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
+
 
 const createGlobalPassOrderForBillingUser = asyncHandler(
   async (req, res, next) => {
     const { event_id, billing_user_id, total_amount, attendees, pass_id } =
       req.body;
+
+    logger.debug(`createGlobalPassOrderForBillingUser request received for event_id: ${event_id}, billing_user_id: ${billing_user_id}`);
 
     const t = await sequelize.transaction();
 
@@ -83,26 +100,28 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         transaction: t,
       });
       if (!event) {
+        logger.warn(`Event not found or inactive for event_id: ${event_id}`);
         await t.rollback();
         return next(new ApiError(404, "Event not found or inactive"));
       }
 
       // 2. Validate global pass existence and active status
-      // Option 1: Use the pass_id provided in body (recommended)
       const pass = await Pass.findOne({
         where: { pass_id, is_active: true, is_global: true },
         transaction: t,
       });
       if (!pass) {
+        logger.warn(`Invalid or inactive global pass for pass_id: ${pass_id}`);
         await t.rollback();
         return next(
           new ApiError(400, "Invalid or inactive global pass for this event")
         );
       }
 
-      // Calculate total price for global pass * attendees count
+      // 3. Validate total amount
       const calculatedTotal = parseFloat(pass.final_price) * attendees.length;
       if (parseFloat(total_amount).toFixed(2) !== calculatedTotal.toFixed(2)) {
+        logger.warn(`Total amount mismatch: received ${total_amount}, expected ${calculatedTotal}`);
         await t.rollback();
         return next(
           new ApiError(
@@ -122,8 +141,8 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         },
         { transaction: t }
       );
-      // -- working fine till this
-      // TODO :: create_event_billing_user
+      logger.info(`Order created successfully with order_id: ${order.order_id}`);
+
       const EventBillingUser = await EventBillingUsers.create(
         {
           billing_user_id,
@@ -133,7 +152,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         { transaction: t }
       );
 
-      // 5. Create single OrderItem for the global pass
+      // 5. Create OrderItem
       const orderItem = await OrderItem.create(
         {
           order_id: order.order_id,
@@ -145,11 +164,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         { transaction: t }
       );
 
-      // 6. For each attendee:
-      // - Check if an issued pass already exists (via issuedpass model by attendee_id and pass_id)
-      // - Create attendee if not exists (by unique keys)
-      // - Create OrderItemAttendee link
-      // - Issue pass if not already issued
+      // 6. Process attendees
       const eventSubevents = await SubEvent.findAll({
         where: { event_id },
         attributes: ["subevent_id"],
@@ -157,8 +172,8 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       });
       const totalSubeventCount = eventSubevents.length;
       const eventSubeventIds = eventSubevents.map((s) => s.subevent_id);
+
       for (const attendeeData of attendees) {
-        // Normalize email and whatsapp
         const normalizedEmail = attendeeData.email.toLowerCase().trim();
         const normalizedWhatsapp = attendeeData.whatsapp
           ? attendeeData.whatsapp.trim()
@@ -181,7 +196,9 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
             },
             { transaction: t }
           );
+          logger.info(`Attendee created: ${normalizedEmail}`);
         }
+
         const linkedSubeventCount = await SubEventAttendee.count({
           where: {
             attendee_id: attendee.attendee_id,
@@ -189,7 +206,9 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           },
           transaction: t,
         });
+
         if (linkedSubeventCount === totalSubeventCount) {
+          logger.warn(`Attendee ${normalizedEmail} already has a global pass for this event`);
           await t.rollback();
           return next(
             new ApiError(
@@ -199,7 +218,6 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           );
         }
 
-        
         await OrderItemAttendee.findOrCreate({
           where: {
             order_item_id: orderItem.order_item_id,
@@ -213,6 +231,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       }
 
       await t.commit();
+      logger.info(`Global pass order completed successfully for order_id: ${order.order_id}`);
 
       return res
         .status(201)
@@ -225,6 +244,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         );
     } catch (error) {
       await t.rollback();
+      logger.error("Failed to create global pass order", { stack: error.stack });
       return next(
         new ApiError(500, "Failed to create global pass order", error)
       );
@@ -235,6 +255,8 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
 const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
   const { subevent_id, billing_user_id, total_amount, attendees } = req.body;
 
+  logger.debug(`createOrderForBillingUser request received for subevent_id: ${subevent_id}, billing_user_id: ${billing_user_id}`);
+
   const t = await sequelize.transaction();
 
   try {
@@ -243,11 +265,13 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       transaction: t,
     });
     if (!subevent) {
+      logger.warn(`Subevent not found or inactive for subevent_id: ${subevent_id}`);
       await t.rollback();
       return next(new ApiError(404, "Subevent not found or inactive"));
     }
 
     if (subevent.available_quantity < attendees.length) {
+      logger.warn(`Not enough quantity for subevent_id: ${subevent_id}. Requested: ${attendees.length}, Available: ${subevent.available_quantity}`);
       await t.rollback();
       return next(
         new ApiError(
@@ -258,10 +282,10 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     }
 
     // 1. Aggregate passes and verify quantities and pricing
-    // key = pass_id, value = quantity requested
     const passQtyMap = new Map();
     for (const attendee of attendees) {
       if (!attendee.pass_id) {
+        logger.warn("pass_id missing for an attendee");
         await t.rollback();
         return next(new ApiError(400, "pass_id is required for each attendee"));
       }
@@ -281,17 +305,19 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     });
 
     if (passes.length !== passQtyMap.size) {
+      logger.warn("One or more passes are invalid or inactive");
       await t.rollback();
       return next(
         new ApiError(400, "One or more passes are invalid or inactive")
       );
     }
 
-    // 3. Calculate total price from passes and quantities
+    // 3. Calculate total price
     let calculatedTotal = 0;
     for (const pass of passes) {
       const qty = passQtyMap.get(pass.pass_id);
       if (qty > 5) {
+        logger.warn(`Pass quantity exceeds limit of 5 for pass_id: ${pass.pass_id}`);
         await t.rollback();
         return next(new ApiError(400, "Pass quantity exceeds limit of 5"));
       }
@@ -299,6 +325,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     }
 
     if (parseFloat(total_amount).toFixed(2) !== calculatedTotal.toFixed(2)) {
+      logger.warn(`Total amount mismatch: received ${total_amount}, expected ${calculatedTotal}`);
       await t.rollback();
       return next(
         new ApiError(400, "Total amount does not match the sum of pass prices")
@@ -315,6 +342,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       },
       { transaction: t }
     );
+    logger.info(`Order created successfully with order_id: ${order.order_id}`);
 
     const event_billing_user = await EventBillingUsers.create(
       {
@@ -346,7 +374,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       orderItemsMap.set(passId, orderItem);
     }
 
-    // 6. Create Attendees, check if exists by { whatsapp, email, subevent_id }
+    // 6. Create Attendees and link to subevent & order items
     for (const attendeeData of attendees) {
       const normalizedEmail = attendeeData.email.toLowerCase().trim();
       const normalizedWhatsapp = attendeeData.whatsapp
@@ -370,8 +398,9 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
           },
           { transaction: t }
         );
+        logger.info(`Attendee created: ${normalizedEmail}`);
       }
-      // Link attendee to the subevent in SubEventAttendee junction table
+
       await SubEventAttendee.findOrCreate({
         where: {
           subevent_id,
@@ -384,9 +413,9 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         transaction: t,
       });
 
-      // 7. Link each attendee to appropriate OrderItem via pass_id
       const orderItem = orderItemsMap.get(attendeeData.pass_id);
       if (!orderItem) {
+        logger.warn(`Pass ID mismatch for attendee ${normalizedEmail}`);
         await t.rollback();
         return next(
           new ApiError(
@@ -396,7 +425,6 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         );
       }
 
-      // Upsert into OrderItemAttendee to avoid duplicates if needed
       await OrderItemAttendee.findOrCreate({
         where: {
           order_item_id: orderItem.order_item_id,
@@ -409,18 +437,18 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       });
     }
 
-    // 8. Update subevent available_quantity
     subevent.available_quantity -= attendees.length;
     await subevent.save({ transaction: t });
 
-    // Commit transaction
     await t.commit();
+    logger.info(`Order completed successfully for order_id: ${order.order_id}`);
 
     return res
       .status(201)
       .json(new ApiResponse(201, { order }, "Order created successfully"));
   } catch (error) {
     await t.rollback();
+    logger.error("Failed to create order", { stack: error.stack });
     return next(new ApiError(500, "Failed to create order", error));
   }
 });
@@ -430,7 +458,10 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
   try {
     const { order_id } = req.body;
 
+    logger.info(`Issue Pass request received for order_id: ${order_id}`);
+
     if (!order_id) {
+      logger.warn("Order ID is missing in request body");
       return next(new ApiError(400, "Order ID is required"));
     }
 
@@ -440,16 +471,25 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     });
 
     if (!order) {
+      logger.warn(`Order not found for id: ${order_id}`);
       return next(new ApiError(404, `Order not found for id: ${order_id}`));
     }
 
     const transaction = order.transaction;
     if (!transaction) {
+      logger.warn(`Transaction not found for order: ${order_id}`);
       return next(new ApiError(400, "Transaction not found for this order"));
     }
 
+    logger.info(
+      `Order ${order_id} found with transaction ${transaction.transaction_id}`
+    );
+
     // 2. Check transaction status
     if (transaction.status !== "success") {
+      logger.warn(
+        `Transaction status is '${transaction.status}' for order ${order_id}`
+      );
       return next(
         new ApiError(
           400,
@@ -461,6 +501,9 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     const orderTotal = parseFloat(order.total_amount).toFixed(2);
     const transactionAmount = parseFloat(transaction.amount).toFixed(2);
     if (orderTotal !== transactionAmount) {
+      logger.warn(
+        `Transaction amount mismatch for order ${order_id}: orderTotal=${orderTotal}, transactionAmount=${transactionAmount}`
+      );
       return next(
         new ApiError(
           400,
@@ -476,8 +519,11 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     });
 
     if (!orderItems.length) {
+      logger.warn(`No order items found for order ${order_id}`);
       return next(new ApiError(400, "No order items found for this order"));
     }
+
+    logger.info(`Found ${orderItems.length} order items for order ${order_id}`);
 
     await Promise.all(
       orderItems.map(async (item) => {
@@ -485,25 +531,28 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
         const pass_id = item.pass_id;
 
         if (!item.pass) {
-          throw new ApiError(
-            400,
-            `Pass not found for order item ${order_item_id}`
-          );
+          logger.error(`Pass not found for order item ${order_item_id}`);
+          throw new ApiError(400, `Pass not found for order item ${order_item_id}`);
         }
 
         const passSubEvents = await PassSubEvent.findAll({
           where: { pass_id },
           attributes: ["subevent_id"],
         });
+
         if (!passSubEvents.length) {
+          logger.warn(`No subevents linked with pass ${pass_id}`);
           throw new ApiError(400, `No subevents linked with pass ${pass_id}`);
         }
+
         const subeventIds = passSubEvents.map((pse) => pse.subevent_id);
         const subevents = await SubEvent.findAll({
           where: { subevent_id: subeventIds },
           attributes: ["subevent_id", "date", "name"],
         });
+
         if (!subevents.length) {
+          logger.warn(`SubEvents not found for pass ${pass_id}`);
           throw new ApiError(400, `SubEvents not found for pass ${pass_id}`);
         }
 
@@ -519,25 +568,28 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
           999
         );
 
-        // Get attendees for order item
         const orderItemAttendees = await OrderItemAttendee.findAll({
           where: { order_item_id },
           include: [{ model: Attendee, as: "attendee" }],
         });
 
         if (!orderItemAttendees.length) {
+          logger.warn(`No attendees found for order item ${order_item_id}`);
           throw new ApiError(
             400,
             `No attendees found for order item ${order_item_id}`
           );
         }
 
+        logger.info(
+          `Issuing passes for ${orderItemAttendees.length} attendees for order item ${order_item_id}`
+        );
+
         await Promise.all(
           orderItemAttendees.map(async (oia) => {
             const attendee = oia.attendee;
             if (!attendee) return;
 
-            // Check if pass already exists
             const checkPassExist = await IssuedPass.findOne({
               where: {
                 pass_id,
@@ -545,14 +597,17 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
                 order_item_id,
               },
             });
+
             if (checkPassExist) {
+              logger.warn(
+                `Pass already issued for attendee ${attendee.attendee_id}, order item ${order_item_id}`
+              );
               throw new ApiError(
                 400,
                 `Pass is already issued for attendee ${attendee.attendee_id}`
               );
             }
 
-            // Create issued pass
             const issuedPass = await IssuedPass.create({
               pass_id,
               attendee_id: attendee.attendee_id,
@@ -563,7 +618,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               is_expired: false,
               issued_date: new Date(),
               expiry_date: expiryDate,
-              booking_number: null, 
+              booking_number: null,
               status: "active",
               used_count: 0,
               qr_data: null,
@@ -571,28 +626,29 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               sponsored_pass: false,
             });
 
-            // Generate QR
+            logger.info(
+              `Issued pass ${issuedPass.issued_pass_id} for attendee ${attendee.attendee_id}`
+            );
+
             const qrData = await generateQR({
               orderItemId: order_item_id,
               orderId: order_id,
-              IssuePass_Id:issuedPass.issued_pass_id,
+              IssuePass_Id: issuedPass.issued_pass_id,
             });
 
             if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
-              throw new ApiError(
-                500,
-                "Failed to generate QR code",
+              logger.error(
+                `Failed to generate QR for issued pass ${issuedPass.issued_pass_id}`,
                 qrData?.error
               );
+              throw new ApiError(500, "Failed to generate QR code", qrData?.error);
             }
 
-            // Update issued pass with QR data
             await issuedPass.update({
               qr_data: qrData.data,
               qr_image: qrData.image,
             });
 
-            // Send mail
             await sendMail(attendee.email, "issuedPass", {
               attendee,
               qrImage: qrData.image,
@@ -601,10 +657,16 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               subeventName: mainSubEvent.name,
               expiryDate: issuedPass.expiry_date,
             });
+
+            logger.info(
+              `Email sent for issued pass ${issuedPass.issued_pass_id} to attendee ${attendee.attendee_id}`
+            );
           })
         );
       })
     );
+
+    logger.info(`All passes issued successfully for order ${order_id}`);
 
     return res
       .status(200)
@@ -612,7 +674,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
         new ApiResponse(200, {}, "Passes issued and emails sent successfully")
       );
   } catch (error) {
-    console.error(error);
+    logger.error("Error in issuePassToAttendees", error);
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -621,24 +683,35 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
 const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
   try {
     const { order_id } = req.body;
+
+    logger.info(`Global pass issuance requested for order_id: ${order_id}`);
+
     if (!order_id) {
+      logger.warn("Order ID missing in request");
       return next(new ApiError(400, "Order ID is required"));
     }
 
-    // 1. Fetch order with transaction and billing user
+    // 1. Fetch order with transaction
     const order = await Order.findByPk(order_id, {
       include: [{ model: Transaction, as: "transaction" }],
     });
+
     if (!order) {
+      logger.warn(`Order not found for id: ${order_id}`);
       return next(new ApiError(404, `Order not found for id: ${order_id}`));
     }
+
     const transaction = order.transaction;
     if (!transaction) {
+      logger.warn(`Transaction not found for order ${order_id}`);
       return next(new ApiError(400, "Transaction not found for this order"));
     }
 
     // 2. Validate transaction status
     if (transaction.status !== "success") {
+      logger.warn(
+        `Transaction status '${transaction.status}' invalid for order ${order_id}`
+      );
       return next(
         new ApiError(
           400,
@@ -647,13 +720,16 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
       );
     }
 
-    // 3. Validate order items count (should be exactly 1 for global pass)
+    // 3. Validate order items count (should be exactly 1)
     const orderItems = await OrderItem.findAll({
       where: { order_id },
       include: [{ model: Pass, as: "pass" }],
     });
 
     if (orderItems.length !== 1) {
+      logger.warn(
+        `Global pass order must have exactly one order item. Found ${orderItems.length}`
+      );
       return next(
         new ApiError(400, "Global pass order must have exactly one order item")
       );
@@ -662,15 +738,20 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
     const item = orderItems[0];
 
     if (!item.pass || !item.pass.is_global) {
+      logger.warn(
+        `Order item ${item.order_item_id} is not a global pass`
+      );
       return next(
         new ApiError(400, "The order item does not correspond to a global pass")
       );
     }
+
     const passSubEvents = await PassSubEvent.findAll({
       where: { pass_id: item.pass.pass_id },
     });
 
     if (!passSubEvents.length) {
+      logger.warn(`No subevents linked with global pass ${item.pass.pass_id}`);
       throw new ApiError(
         400,
         `No subevents linked with global pass ${item.pass.pass_id}`
@@ -683,35 +764,35 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
       attributes: ["subevent_id", "date", "name", "day"],
       order: [["day", "ASC"]],
     });
+
     if (!subevents.length) {
-      return next(
-        new ApiError(400, "Subevent linked to global pass not found")
-      );
+      logger.warn(`Subevents not found for global pass ${item.pass.pass_id}`);
+      return next(new ApiError(400, "Subevent linked to global pass not found"));
     }
 
     // 4. Fetch attendees linked to the order item
     const orderItemAttendees = await OrderItemAttendee.findAll({
       where: { order_item_id: item.order_item_id },
-      include: [
-        {
-          model: Attendee,
-          as: "attendee",
-        },
-      ],
+      include: [{ model: Attendee, as: "attendee" }],
     });
 
     if (!orderItemAttendees.length) {
+      logger.warn(`No attendees found for order item ${item.order_item_id}`);
       return next(
         new ApiError(400, "No attendees found for the global pass order item")
       );
     }
 
-    // 6. Issue passes & send emails in parallel
+    logger.info(
+      `Issuing global passes for ${orderItemAttendees.length} attendees`
+    );
+
+    // 5. Issue passes & send emails
     await Promise.all(
       orderItemAttendees.map(async (oia) => {
         const attendee = oia.attendee;
         if (!attendee) return;
-        // Generate one QR code per subevent; create issued pass per subevent
+
         const issuedPassDetails = await Promise.all(
           subevents.map(async (subevent) => {
             const subeventDate = new Date(subevent.date);
@@ -733,9 +814,14 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
                 order_item_id: item.order_item_id,
               },
             });
-            if(existingPass){
-              return new ApiError(400, `Pass is Already issued`);
+
+            if (existingPass) {
+              logger.warn(
+                `Pass already issued for attendee ${attendee.attendee_id} for subevent ${subevent.subevent_id}`
+              );
+              return new ApiError(400, `Pass is already issued`);
             }
+
             const issuedPass = await IssuedPass.create({
               pass_id: item.pass.pass_id,
               attendee_id: attendee.attendee_id,
@@ -754,14 +840,22 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               sponsored_pass: false,
             });
 
+            logger.info(
+              `Issued pass ${issuedPass.issued_pass_id} for attendee ${attendee.attendee_id}, subevent ${subevent.subevent_id}`
+            );
+
             const qrData = await generateQR({
               orderItemId: item.order_item_id,
               orderId: order_id,
               subeventId: subevent.subevent_id,
-              IssuePassId:issuedPass.issued_pass_id,
+              IssuePassId: issuedPass.issued_pass_id,
             });
 
             if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              logger.error(
+                `Failed to generate QR for issued pass ${issuedPass.issued_pass_id}`,
+                qrData?.error
+              );
               throw new ApiError(
                 500,
                 "Failed to generate QR code",
@@ -769,12 +863,11 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               );
             }
 
-            // update the issued pass 
             await issuedPass.update({
               qr_data: qrData.data,
               qr_image: qrData.image,
             });
-            
+
             return {
               subeventName: subevent.name,
               expiryDate,
@@ -782,6 +875,7 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
             };
           })
         );
+
         await sendMail(attendee.email, "issuedPassMultiDay", {
           attendee,
           passes: issuedPassDetails.map((pass, i) => ({
@@ -791,8 +885,12 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
           passCategory: item.pass.category,
           orderNumber: order_id,
         });
+
+        logger.info(`Email sent to attendee ${attendee.attendee_id}`);
       })
     );
+
+    logger.info(`All global passes issued successfully for order ${order_id}`);
 
     return res
       .status(200)
@@ -804,7 +902,7 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    console.error(error);
+    logger.error("Error in issueGlobalPassToAttendees", error);
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
