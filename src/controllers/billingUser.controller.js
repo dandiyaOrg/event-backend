@@ -458,7 +458,6 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
       );
     }
 
-    // 3. Check amount match (strict equality for cents precision)
     const orderTotal = parseFloat(order.total_amount).toFixed(2);
     const transactionAmount = parseFloat(transaction.amount).toFixed(2);
     if (orderTotal !== transactionAmount) {
@@ -492,7 +491,6 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
           );
         }
 
-        // Get linked subevent(s) for pass (assuming at least one)
         const passSubEvents = await PassSubEvent.findAll({
           where: { pass_id },
           attributes: ["subevent_id"],
@@ -509,7 +507,6 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
           throw new ApiError(400, `SubEvents not found for pass ${pass_id}`);
         }
 
-        // For simplicity, pick the first subevent for expiry and email context
         const mainSubEvent = subevents[0];
         const subeventDate = new Date(mainSubEvent.date);
         const expiryDate = new Date(
@@ -521,6 +518,8 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
           59,
           999
         );
+
+        // Get attendees for order item
         const orderItemAttendees = await OrderItemAttendee.findAll({
           where: { order_item_id },
           include: [{ model: Attendee, as: "attendee" }],
@@ -532,27 +531,13 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
             `No attendees found for order item ${order_item_id}`
           );
         }
+
         await Promise.all(
           orderItemAttendees.map(async (oia) => {
             const attendee = oia.attendee;
             if (!attendee) return;
 
-            const qrData = await generateQR({
-              attendeeId: attendee.attendee_id,
-              passId: pass_id,
-              orderItemId: order_item_id,
-              orderId: order_id,
-            });
-
-            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
-              throw new ApiError(
-                500,
-                "Failed to generate QR code",
-                qrData?.error
-              );
-            }
-
-            // check issued pass already exits or not
+            // Check if pass already exists
             const checkPassExist = await IssuedPass.findOne({
               where: {
                 pass_id,
@@ -561,8 +546,13 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               },
             });
             if (checkPassExist) {
-              return new ApiError(400, `Pass is Already issued`);
+              throw new ApiError(
+                400,
+                `Pass is already issued for attendee ${attendee.attendee_id}`
+              );
             }
+
+            // Create issued pass
             const issuedPass = await IssuedPass.create({
               pass_id,
               attendee_id: attendee.attendee_id,
@@ -573,17 +563,39 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               is_expired: false,
               issued_date: new Date(),
               expiry_date: expiryDate,
-              booking_number: null,
+              booking_number: null, 
               status: "active",
               used_count: 0,
-              qr_data: qrData.data,
-              qr_image: qrData.image,
+              qr_data: null,
+              qr_image: null,
               sponsored_pass: false,
             });
 
+            // Generate QR
+            const qrData = await generateQR({
+              orderItemId: order_item_id,
+              orderId: order_id,
+              IssuePass_Id:issuedPass.issued_pass_id,
+            });
+
+            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              throw new ApiError(
+                500,
+                "Failed to generate QR code",
+                qrData?.error
+              );
+            }
+
+            // Update issued pass with QR data
+            await issuedPass.update({
+              qr_data: qrData.data,
+              qr_image: qrData.image,
+            });
+
+            // Send mail
             await sendMail(attendee.email, "issuedPass", {
               attendee,
-              qrImage: qrData?.image,
+              qrImage: qrData.image,
               passCategory: item.pass.category,
               orderNumber: order_id,
               subeventName: mainSubEvent.name,
@@ -593,6 +605,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
         );
       })
     );
+
     return res
       .status(200)
       .json(
@@ -603,6 +616,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
+
 
 const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
   try {
@@ -711,22 +725,6 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               999
             );
 
-            const qrData = await generateQR({
-              attendeeId: attendee.attendee_id,
-              passId: item.pass.pass_id,
-              orderItemId: item.order_item_id,
-              orderId: order_id,
-              subeventId: subevent.subevent_id,
-            });
-
-            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
-              throw new ApiError(
-                500,
-                "Failed to generate QR code",
-                qrData?.error
-              );
-            }
-
             const existingPass = await IssuedPass.findOne({
               where: {
                 pass_id: item.pass.pass_id,
@@ -751,11 +749,32 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               booking_number: null,
               status: "active",
               used_count: 0,
-              qr_data: qrData.data,
-              qr_image: qrData.image,
+              qr_data: null,
+              qr_image: null,
               sponsored_pass: false,
             });
 
+            const qrData = await generateQR({
+              orderItemId: item.order_item_id,
+              orderId: order_id,
+              subeventId: subevent.subevent_id,
+              IssuePassId:issuedPass.issued_pass_id,
+            });
+
+            if (!qrData || !qrData.success || !qrData.image || !qrData.data) {
+              throw new ApiError(
+                500,
+                "Failed to generate QR code",
+                qrData?.error
+              );
+            }
+
+            // update the issued pass 
+            await issuedPass.update({
+              qr_data: qrData.data,
+              qr_image: qrData.image,
+            });
+            
             return {
               subeventName: subevent.name,
               expiryDate,
