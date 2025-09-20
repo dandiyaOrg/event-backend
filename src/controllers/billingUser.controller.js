@@ -14,6 +14,7 @@ import {
   Attendee,
   Transaction,
   IssuedPass,
+  sequelize,
 } from "../db/models/index.js";
 
 import sendMail from "../utils/sendMail.js";

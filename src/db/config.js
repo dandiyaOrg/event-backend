@@ -1,51 +1,49 @@
+// src/db/config.js
 const config = {
-  development: {
-    username: process.env.DB_USERNAME || "root",
-    password: process.env.DB_PASSWORD || "",
-    database: process.env.DB_NAME || "event_management_dev",
-    host: process.env.DB_HOST || "localhost",
-    port: process.env.DB_PORT || 3306,
-    dialect: "mysql",
-    logging: console.log, // Set to false in production
-    timezone: "+05:30", // IST timezone
-    pool: {
-      max: 10,
-      min: 0,
-      acquire: 30000,
-      idle: 10000,
-    },
-    define: {
-      underscored: true,
-      freezeTableName: true,
-      timestamps: true,
-      createdAt: "created_at",
-      updatedAt: "updated_at",
-    },
-  },
   production: {
-    username: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT || 3306,
-    dialect: "mysql",
+    username:
+      process.env.DB_USERNAME ||
+      process.env.POSTGRES_USER ||
+      process.env.PGUSER ||
+      "appuser",
+    password:
+      process.env.DB_PASSWORD ||
+      process.env.POSTGRES_PASSWORD ||
+      process.env.PGPASSWORD ||
+      "strongpassword!",
+    database:
+      process.env.DB_NAME ||
+      process.env.POSTGRES_DB ||
+      process.env.PGDATABASE ||
+      "appdb",
+    host: process.env.DB_HOST || process.env.POSTGRES_HOST || "postgres",
+    port: process.env.DB_PORT
+      ? parseInt(process.env.DB_PORT, 10)
+      : process.env.POSTGRES_PORT
+        ? parseInt(process.env.POSTGRES_PORT, 10)
+        : 5432,
+    dialect: "postgres",
     logging: false,
     timezone: "+05:30",
+    // SSL only if explicitly enabled
     ssl: process.env.DB_SSL === "true",
-    dialectOptions: {
-      ssl:
-        process.env.DB_SSL === "true"
-          ? {
-              require: true,
-              rejectUnauthorized: false,
-            }
-          : false,
-    },
+    dialectOptions:
+      process.env.DB_SSL === "true"
+        ? { ssl: { require: true, rejectUnauthorized: false } }
+        : {},
     pool: {
-      max: 20,
-      min: 0,
-      acquire: 60000,
-      idle: 10000,
+      max: process.env.SEQ_POOL_MAX
+        ? parseInt(process.env.SEQ_POOL_MAX, 10)
+        : 10,
+      min: process.env.SEQ_POOL_MIN
+        ? parseInt(process.env.SEQ_POOL_MIN, 10)
+        : 0,
+      acquire: process.env.SEQ_POOL_ACQUIRE
+        ? parseInt(process.env.SEQ_POOL_ACQUIRE, 10)
+        : 30000,
+      idle: process.env.SEQ_POOL_IDLE
+        ? parseInt(process.env.SEQ_POOL_IDLE, 10)
+        : 10000,
     },
   },
 };

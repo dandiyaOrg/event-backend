@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-const app = express();
 import helmet from "helmet";
 import morgan from "morgan";
 import compression from "compression";
@@ -10,6 +9,7 @@ import "winston-daily-rotate-file";
 
 import { errHandler } from "./middlewares/err.middleware.js";
 
+const app = express();
 // Winston Logger Setup
 const dailyRotateFileTransport = new winston.transports.DailyRotateFile({
   filename: "logs/application-%DATE%.log",
@@ -79,12 +79,24 @@ app.use(morgan("combined", { stream: morganStream })); // Morgan using Winston s
 // Use compression to gzip responses
 app.use(compression());
 
+// ---- NEW: respond 503 during graceful shutdown ----
+app.locals.shuttingDown = false;
+app.use((req, res, next) => {
+  if (app.locals.shuttingDown) {
+    return res.status(503).json({ message: "Server is shutting down" });
+  }
+  next();
+});
+
 import adminRoutes from "./routes/admin.routes.js";
 import eventRoutes from "./routes/event.routes.js";
 import employeeRoutes from "./routes/emp.routes.js";
 import subeventRoutes from "./routes/subevent.routes.js";
 import passRoutes from "./routes/pass.routes.js";
 import billingUserRoutes from "./routes/billingUser.routes.js";
+// Health routes (NEW)
+import healthRoutes from "./routes/health.routes.js";
+app.use("/_health", healthRoutes); // endpoints: /_health/health, /_health/ready, /_health/live
 
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/event", eventRoutes);
