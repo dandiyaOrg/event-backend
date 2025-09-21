@@ -73,7 +73,7 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
         )
       );
     }
-    const imagelocalPath = req.body.image;
+    const imagelocalPath = req.file.path;
     let imageUrl;
     if (imagelocalPath) {
       try {
@@ -230,7 +230,7 @@ const UpdateSubevent = asyncHandler(async (req, res, next) => {
     }
     let imageUrl;
     if (req.file) {
-      const imagelocalPath = req.file?.path;
+      const imagelocalPath = req.file.path;
       if (imagelocalPath) {
         try {
           const { success, data, error } =

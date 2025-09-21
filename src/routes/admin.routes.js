@@ -10,6 +10,7 @@ import {
   getAllBillingUserForEvent,
   getBillingUsersForAdmin,
   getTransactionsForAdmin,
+  getAllOrdersForAdmin,
 } from "../controllers/admin.controller.js";
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
@@ -48,4 +49,5 @@ router
   .get(verifyJWT, getAllBillingUserForEvent);
 
 router.route("/transactions").get(verifyJWT, getTransactionsForAdmin);
+router.route("/orders").get(verifyJWT, getAllOrdersForAdmin);
 export default router;

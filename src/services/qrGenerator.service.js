@@ -5,7 +5,7 @@ import { uploadOnCloudinary } from "../utils/clodinary.js";
 
 async function generateQRCodeAndUpload(eventId) {
   try {
-    const domain = "https://your-domain.com";
+    const domain = "https://rkgarbanight.com";
     const qrUrl = `${domain}/${eventId}`;
 
     const fileName = `qr_${eventId}.png`;
