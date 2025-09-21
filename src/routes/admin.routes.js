@@ -11,7 +11,11 @@ import {
   getBillingUsersForAdmin,
   getTransactionsForAdmin,
   getAllOrdersForAdmin,
+  getOrderDetails,
+  getAllEventsAttendees,
+  getAllAttendeesForAdmin,
 } from "../controllers/admin.controller.js";
+
 import validateBody from "../middlewares/validateBody.middleware.js";
 import {
   adminRegisterSchema,
@@ -49,5 +53,9 @@ router
   .get(verifyJWT, getAllBillingUserForEvent);
 
 router.route("/transactions").get(verifyJWT, getTransactionsForAdmin);
+router.route("/events/attendees").get(verifyJWT, getAllEventsAttendees);
 router.route("/orders").get(verifyJWT, getAllOrdersForAdmin);
+router.route("/order/detail/:orderId").get(verifyJWT, getOrderDetails);
+router.route("/attendees").get(verifyJWT, getAllAttendeesForAdmin);
+
 export default router;

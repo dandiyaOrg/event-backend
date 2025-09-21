@@ -125,13 +125,14 @@ Admin.prototype.generateAccessToken = function () {
   );
 };
 
-Admin.prototype.generateRefreshToken = function () {
+Admin.prototype.generateRefreshToken = async function () {
   const token = jwt.sign(
     { admin_id: this.admin_id },
     process.env.REFRESH_TOKEN_SECRET,
     { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }
   );
   this.refreshToken = token;
+  await this.save();
   return token;
 };
 

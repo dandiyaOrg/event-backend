@@ -6,12 +6,20 @@ import {
   BillingUser,
   EventBillingUsers,
   Transaction,
+  Attendee,
+  Event,
   Order,
+  OrderItemAttendee,
+  SubEvent,
+  SubEventAttendee,
   OrderItem,
+  Pass,
 } from "../db/models/index.js";
 import { Op } from "sequelize";
+import jwt from "jsonwebtoken";
 import sendMail from "../utils/sendMail.js";
 import { logger } from "../app.js";
+import { validate as isUUID } from "uuid";
 
 const registerAdmin = asyncHandler(async (req, res, next) => {
   try {
@@ -155,7 +163,7 @@ const verifyOTPForLogin = asyncHandler(async (req, res, next) => {
     }
 
     const accessToken = admin.generateAccessToken();
-    const refreshToken = admin.generateRefreshToken();
+    const refreshToken = await admin.generateRefreshToken();
 
     if (!(accessToken && refreshToken)) {
       logger.error(`Token generation failed for admin ${admin_id}`);
@@ -187,17 +195,19 @@ const verifyOTPForLogin = asyncHandler(async (req, res, next) => {
 
 const refreshAccessToken = asyncHandler(async (req, res, next) => {
   try {
-    const { refreshToken } =
-      req.cookies || req.header("refreshToken") || req.body;
+    const refreshToken =
+      req.cookies?.refreshToken ||
+      req.get("refreshToken") ||
+      req.body?.refreshToken;
 
     if (!refreshToken) {
       logger.warn("Refresh token missing in request");
       return next(new ApiError(400, "Refresh Token is required"));
     }
 
-    let decodedtoken;
+    let decodedToken;
     try {
-      decodedtoken = await jwt.verify(
+      decodedToken = await jwt.verify(
         refreshToken,
         process.env.REFRESH_TOKEN_SECRET
       );
@@ -209,9 +219,7 @@ const refreshAccessToken = asyncHandler(async (req, res, next) => {
       return next(new ApiError(401, "Token Expired Or Invalid", err));
     }
 
-    const admin = await Admin.findUnique({
-      where: { admin_id: decodedtoken.admin_id },
-    });
+    const admin = await Admin.findByPk(decodedToken?.admin_id);
 
     if (!admin) {
       logger.warn(
@@ -635,28 +643,28 @@ const getAllOrdersForAdmin = asyncHandler(async (req, res, next) => {
 
 const getAllBillingUserForEvent = asyncHandler(async (req, res, next) => {
   try {
-    const { event_id } = req.query;
+    const { eventId } = req.params;
 
-    if (!event_id) {
+    if (!eventId) {
       logger.warn("GetAllBillingUserToEvnt request missing event_id");
       return next(new ApiError(404, "Required EventId"));
     }
 
-    logger.debug(`Fetching billing users for event_id: ${event_id}`);
+    logger.debug(`Fetching billing users for event_id: ${eventId}`);
 
     const billingUsers = await EventBillingUsers.findAll({
-      where: { event_id },
+      where: { eventId },
     });
 
     if (!billingUsers || billingUsers.length === 0) {
-      logger.info(`No billing users found for event_id: ${event_id}`);
+      logger.info(`No billing users found for eventId: ${eventId}`);
       return next(
         new ApiError(404, "No Billing User Corresponding to the EventId")
       );
     }
 
     logger.info(
-      `Fetched ${billingUsers.length} billing users for event_id: ${event_id}`
+      `Fetched ${billingUsers.length} billing users for eventId: ${eventId}`
     );
     return res
       .status(200)
@@ -676,6 +684,426 @@ const getAllBillingUserForEvent = asyncHandler(async (req, res, next) => {
   }
 });
 
+const getOrderDetails = asyncHandler(async (req, res, next) => {
+  try {
+    const { orderId } = req.params;
+    const admin_id = req.admin_id;
+
+    if (!orderId || !isUUID(orderId)) {
+      logger.warn("Missing or wrong orderId", { orderId });
+      return next(new ApiError(404, "Missing Or Wrong UUID"));
+    }
+
+    if (!admin_id) {
+      logger.warn("Missing admin_id on request");
+      return next(new ApiError(401, "Unauthorized"));
+    }
+
+    logger.debug(
+      `Fetching order details for order_id: ${orderId}, admin_id: ${admin_id}`
+    );
+
+    // Single query using associations/aliases you defined in your models/index
+    const order = await Order.findOne({
+      where: { order_id: orderId, admin_id },
+      include: [
+        { model: BillingUser, as: "billing_user", required: false },
+        { model: Transaction, as: "transaction", required: false },
+        {
+          model: OrderItem,
+          as: "order_items",
+          required: false,
+          include: [
+            { model: Pass, as: "pass", required: false },
+            {
+              model: OrderItemAttendee,
+              as: "orderItemAttendees",
+              required: false,
+              attributes: [
+                "order_item_attendee_id",
+                "assigned_date",
+                "created_at",
+              ], // keep join meta if you want; not required
+              include: [
+                {
+                  model: Attendee,
+                  as: "attendee",
+                  required: false,
+                  attributes: [
+                    "attendee_id",
+                    "name",
+                    "whatsapp",
+                    "email",
+                    "dob",
+                    "gender",
+                    "age",
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    if (!order) {
+      logger.info("Order not found or not accessible by admin", {
+        orderId,
+        admin_id,
+      });
+      return next(new ApiError(404, "Order not found"));
+    }
+
+    const o = typeof order.toJSON === "function" ? order.toJSON() : order;
+
+    // Build response exactly in the shape you requested
+    const responsePayload = {
+      order_id: o.order_id,
+      razorpay_order_id: o.razorpay_order_id,
+      billing_user_id: o.billing_user_id,
+      status: o.status,
+      total_amount: o.total_amount,
+      created_at: o.created_at,
+      updated_at: o.updated_at,
+      order_items: (o.order_items || []).map((item) => {
+        // some items may be plain objects or sequelize instances
+        const it = typeof item.toJSON === "function" ? item.toJSON() : item;
+
+        // pass shape
+        const pass = it.pass
+          ? {
+              pass_id: it.pass.pass_id,
+              category: it.pass.category,
+              total_price: it.pass.total_price,
+              discount_percentage: it.pass.discount_percentage,
+              final_price: it.pass.final_price,
+              validity: it.pass.validity,
+              is_global: it.pass.is_global,
+              is_active: it.pass.is_active,
+            }
+          : null;
+
+        // attendees: map through orderItemAttendees -> attendee
+        const attendees =
+          (it.orderItemAttendees || [])
+            .map((oia) => {
+              const joi = typeof oia.toJSON === "function" ? oia.toJSON() : oia;
+              const a = joi.attendee;
+              if (!a) return null;
+              const at = typeof a.toJSON === "function" ? a.toJSON() : a;
+              return {
+                attendee_id: at.attendee_id,
+                name: at.name,
+                whatsapp: at.whatsapp,
+                email: at.email,
+                dob: at.dob,
+                gender: at.gender,
+                age: at.age,
+              };
+            })
+            .filter(Boolean) || [];
+
+        return {
+          order_item_id: it.order_item_id,
+          pass_id: it.pass_id,
+          quantity: it.quantity,
+          price: it.price,
+          pass,
+          attendees,
+        };
+      }),
+    };
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          responsePayload,
+          "Order details fetched successfully"
+        )
+      );
+  } catch (error) {
+    logger.error("Internal Server Error while fetching order details", {
+      message: error.message,
+      stack: error.stack,
+    });
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
+const getAllEventsAttendees = asyncHandler(async (req, res, next) => {
+  try {
+    const admin_id = req.admin_id;
+    if (!admin_id) {
+      logger.warn("Missing admin_id on request");
+      return next(new ApiError(401, "Unauthorized"));
+    }
+
+    logger.debug(
+      `Fetching events -> subevents -> attendees for admin_id: ${admin_id}`
+    );
+
+    const events = await Event.findAll({
+      where: { admin_id },
+      attributes: [
+        "event_id",
+        "event_name",
+        "description",
+        "created_at",
+        "updated_at",
+      ],
+      include: [
+        {
+          model: SubEvent,
+          as: "subevents",
+          required: false,
+          attributes: [
+            "subevent_id",
+            "name",
+            "date",
+            "start_time",
+            "end_time",
+            "day",
+            "quantity",
+            "available_quantity",
+            "is_active",
+          ],
+          include: [
+            // explicit join-model include — robust and exposes join metadata
+            {
+              model: SubEventAttendee,
+              as: "subeventAttendees", // must match your associations
+              required: false,
+              attributes: ["subevent_attendee_id", "created_at"], // join metadata
+              include: [
+                {
+                  model: Attendee,
+                  as: "attendee",
+                  required: false,
+                  attributes: [
+                    "attendee_id",
+                    "name",
+                    "whatsapp",
+                    "email",
+                    "dob",
+                    "gender",
+                    "age",
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      order: [
+        ["created_at", "DESC"],
+        [{ model: SubEvent, as: "subevents" }, "date", "ASC"],
+      ],
+    });
+
+    if (!events.length) {
+      logger.info(`No events found for admin_id: ${admin_id}`);
+      return res
+        .status(204)
+        .json(new ApiResponse(204, { events: [] }, "No events found"));
+    }
+    // build payload
+    const payloadEvents = (events || []).map((ev) => {
+      const e = ev.toJSON ? ev.toJSON() : ev;
+      return {
+        event_id: e.event_id,
+        name: e.name,
+        description: e.description,
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+        subevents: (e.subevents || []).map((se) => {
+          const s = se.toJSON ? se.toJSON() : se;
+          return {
+            subevent_id: s.subevent_id,
+            name: s.name,
+            date: s.date,
+            start_time: s.start_time,
+            end_time: s.end_time,
+            day: s.day,
+            quantity: s.quantity,
+            available_quantity: s.available_quantity,
+            is_active: s.is_active,
+            attendees:
+              (s.subeventAttendees || [])
+                .map((jr) => {
+                  const joinRow = jr.toJSON ? jr.toJSON() : jr;
+                  const a = joinRow.attendee || {};
+                  if (!a.attendee_id) return null;
+                  return {
+                    attendee_id: a.attendee_id,
+                    name: a.name,
+                    whatsapp: a.whatsapp,
+                    email: a.email,
+                    dob: a.dob,
+                    gender: a.gender,
+                    age: a.age,
+                    // join metadata
+                    subevent_attendee_id: joinRow.subevent_attendee_id,
+                    registered_at: joinRow.created_at,
+                  };
+                })
+                .filter(Boolean) || [],
+          };
+        }),
+      };
+    });
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { events: payloadEvents },
+          "Events, subevents and attendees fetched successfully"
+        )
+      );
+  } catch (error) {
+    logger.error("Internal Server Error while fetching attendees by admin", {
+      message: error.message,
+      stack: error.stack,
+      sql: error?.sql || null,
+    });
+
+    if (error?.parent?.code === "42703") {
+      // helpful hint for future debugging
+      return next(
+        new ApiError(
+          500,
+          "Database column not found. Check model <-> DB column names (see server logs for SQL)."
+        )
+      );
+    }
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
+const getAllAttendeesForAdmin = asyncHandler(async (req, res, next) => {
+  try {
+    const admin_id = req.admin_id;
+    if (!admin_id) {
+      logger.warn("Missing admin_id on request");
+      return next(new ApiError(401, "Unauthorized"));
+    }
+
+    logger.debug(`Fetching subevents for admin_id: ${admin_id}`);
+
+    // 1) fetch subevent ids for this admin
+    const subevents = await SubEvent.findAll({
+      where: { admin_id },
+      attributes: ["subevent_id"], // only need IDs here
+    });
+
+    const subeventIds = (subevents || []).map((s) =>
+      s.toJSON ? s.toJSON().subevent_id : s.subevent_id
+    );
+
+    if (!subeventIds.length) {
+      logger.info(`No subevents found for admin_id: ${admin_id}`);
+      return res
+        .status(200)
+        .json(
+          new ApiResponse(
+            200,
+            { attendees: [], by_subevent: {}, total_attendees: 0 },
+            "No attendees found"
+          )
+        );
+    }
+
+    // 2) fetch join rows and include Attendee
+    const joinRows = await SubEventAttendee.findAll({
+      where: { subevent_id: subeventIds },
+      attributes: ["subevent_attendee_id", "subevent_id", "created_at"], // join metadata kept if needed
+      include: [
+        {
+          model: Attendee,
+          as: "attendee", // must match association alias
+          required: false,
+          attributes: [
+            "attendee_id",
+            "name",
+            "whatsapp",
+            "email",
+            "dob",
+            "gender",
+            "age",
+            "created_at",
+            "updated_at",
+          ],
+        },
+      ],
+      order: [["created_at", "ASC"]],
+    });
+
+    // 3) build deduped flat list + by_subevent with only ids + total
+    const byId = new Map();
+    const bySubevent = {}; // { subevent_id: { attendee_ids: [], total: n } }
+
+    for (const jr of joinRows) {
+      const joinObj = jr.toJSON ? jr.toJSON() : jr;
+      const subevent_id = joinObj.subevent_id;
+      const att = joinObj.attendee;
+      if (!att || !att.attendee_id) continue;
+
+      if (!byId.has(att.attendee_id)) {
+        byId.set(att.attendee_id, {
+          attendee_id: att.attendee_id,
+          name: att.name,
+          whatsapp: att.whatsapp,
+          email: att.email,
+          dob: att.dob,
+          gender: att.gender,
+          age: att.age,
+          created_at: att.created_at,
+          updated_at: att.updated_at,
+        });
+      }
+
+      // group by subevent with only ids
+      if (!bySubevent[subevent_id]) {
+        bySubevent[subevent_id] = { attendee_ids: [], total: 0 };
+      }
+      // avoid duplicate attendee_id inside same subevent
+      if (!bySubevent[subevent_id].attendee_ids.includes(att.attendee_id)) {
+        bySubevent[subevent_id].attendee_ids.push(att.attendee_id);
+        bySubevent[subevent_id].total =
+          bySubevent[subevent_id].attendee_ids.length;
+      }
+    }
+
+    const attendees = Array.from(byId.values());
+    const total_attendees = attendees.length;
+
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          attendees, // deduped full attendee objects
+          by_subevent: bySubevent, // each subevent -> { attendee_ids: [...], total: N }
+          total_attendees,
+        },
+        "Attendees fetched successfully"
+      )
+    );
+  } catch (error) {
+    logger.error(
+      "Internal Server Error while fetching all attendees for admin",
+      {
+        message: error.message,
+        stack: error.stack,
+        sql: error?.sql || null,
+      }
+    );
+    return next(new ApiError(500, "Internal Server Error", error));
+  }
+});
+
 export {
   loginWithEmail,
   refreshAccessToken,
@@ -688,4 +1116,7 @@ export {
   getAllBillingUserForEvent,
   getTransactionsForAdmin,
   getAllOrdersForAdmin,
+  getOrderDetails,
+  getAllEventsAttendees,
+  getAllAttendeesForAdmin,
 };
