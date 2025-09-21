@@ -1,7 +1,14 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { Admin, BillingUser ,EventBillingUsers,Transaction,Order,OrderItem } from "../db/models/index.js";
+import {
+  Admin,
+  BillingUser,
+  EventBillingUsers,
+  Transaction,
+  Order,
+  OrderItem,
+} from "../db/models/index.js";
 import { Op } from "sequelize";
 import sendMail from "../utils/sendMail.js";
 import { logger } from "../app.js";
@@ -11,7 +18,9 @@ const registerAdmin = asyncHandler(async (req, res, next) => {
     const { name, mobile_no, email, address, password, organization } =
       req.body;
 
-    logger.debug(`Registering admin with email: ${email}, mobile: ${mobile_no}`);
+    logger.debug(
+      `Registering admin with email: ${email}, mobile: ${mobile_no}`
+    );
 
     const existingAdmin = await Admin.findOne({
       where: {
@@ -49,11 +58,12 @@ const registerAdmin = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    logger.error(`Error registering admin: ${error.message}`, { stack: error.stack });
+    logger.error(`Error registering admin: ${error.message}`, {
+      stack: error.stack,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
 
 const loginWithEmail = asyncHandler(async (req, res, next) => {
   try {
@@ -110,7 +120,9 @@ const loginWithEmail = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    logger.error("Internal Server Error during admin login", { stack: error.stack });
+    logger.error("Internal Server Error during admin login", {
+      stack: error.stack,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -130,7 +142,9 @@ const verifyOTPForLogin = asyncHandler(async (req, res, next) => {
 
     const admin = await Admin.findOne({ where: { admin_id } });
     if (!admin) {
-      logger.warn(`OTP verification failed: Admin not found for id ${admin_id}`);
+      logger.warn(
+        `OTP verification failed: Admin not found for id ${admin_id}`
+      );
       return next(new ApiError(404, "Admin not found, please register first"));
     }
 
@@ -164,11 +178,12 @@ const verifyOTPForLogin = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    logger.error("Internal Server Error during OTP verification", { stack: error.stack });
+    logger.error("Internal Server Error during OTP verification", {
+      stack: error.stack,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
 
 const refreshAccessToken = asyncHandler(async (req, res, next) => {
   try {
@@ -186,7 +201,9 @@ const refreshAccessToken = asyncHandler(async (req, res, next) => {
         refreshToken,
         process.env.REFRESH_TOKEN_SECRET
       );
-      logger.debug(`Decoded refresh token for admin_id: ${decodedToken.admin_id}`);
+      logger.debug(
+        `Decoded refresh token for admin_id: ${decodedToken.admin_id}`
+      );
     } catch (err) {
       logger.warn("Invalid or expired refresh token", { error: err });
       return next(new ApiError(401, "Token Expired Or Invalid", err));
@@ -197,7 +214,9 @@ const refreshAccessToken = asyncHandler(async (req, res, next) => {
     });
 
     if (!admin) {
-      logger.warn(`Admin not found for refresh token: ${decodedToken.admin_id}`);
+      logger.warn(
+        `Admin not found for refresh token: ${decodedToken.admin_id}`
+      );
       return next(new ApiError(404, "Admin not found, please register first"));
     }
 
@@ -208,13 +227,17 @@ const refreshAccessToken = asyncHandler(async (req, res, next) => {
 
     const accessToken = admin.generateAccessToken();
     if (!accessToken) {
-      logger.error(`Failed to generate access token for admin ${admin.admin_id}`);
+      logger.error(
+        `Failed to generate access token for admin ${admin.admin_id}`
+      );
       return next(new ApiError(500, "Error generating access token"));
     }
 
     res.setHeader("accessToken", accessToken);
 
-    logger.info(`Access token refreshed successfully for admin ${admin.admin_id}`);
+    logger.info(
+      `Access token refreshed successfully for admin ${admin.admin_id}`
+    );
     return res
       .status(200)
       .json(
@@ -225,11 +248,12 @@ const refreshAccessToken = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    logger.error("Internal Server Error during token refresh", { stack: error.stack });
+    logger.error("Internal Server Error during token refresh", {
+      stack: error.stack,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
 
 const forgetPassword = asyncHandler(async (req, res, next) => {
   try {
@@ -278,7 +302,9 @@ const forgetPassword = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    logger.error("Internal Server Error during forget password", { stack: error.stack });
+    logger.error("Internal Server Error during forget password", {
+      stack: error.stack,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -288,7 +314,9 @@ const verifyOTPForPasswordReset = asyncHandler(async (req, res, next) => {
     const { admin_id, otp, newPassword } = req.body;
 
     if (!(admin_id && otp)) {
-      logger.warn("Password reset verification attempt with missing fields", { admin_id });
+      logger.warn("Password reset verification attempt with missing fields", {
+        admin_id,
+      });
       return next(
         new ApiError(
           400,
@@ -301,7 +329,9 @@ const verifyOTPForPasswordReset = asyncHandler(async (req, res, next) => {
 
     const admin = await Admin.findOne({ where: { admin_id } });
     if (!admin) {
-      logger.warn(`Admin not found for password reset OTP verification: ${admin_id}`);
+      logger.warn(
+        `Admin not found for password reset OTP verification: ${admin_id}`
+      );
       return next(new ApiError(404, "Admin not found, please register first"));
     }
 
@@ -318,7 +348,10 @@ const verifyOTPForPasswordReset = asyncHandler(async (req, res, next) => {
       .status(201)
       .json(new ApiResponse(201, {}, "Password updated successfully"));
   } catch (error) {
-    logger.error("Internal Server Error during password reset OTP verification", { stack: error.stack });
+    logger.error(
+      "Internal Server Error during password reset OTP verification",
+      { stack: error.stack }
+    );
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -344,7 +377,9 @@ const getAdminDetails = asyncHandler(async (req, res, next) => {
       .status(200)
       .json(new ApiResponse(200, admin, "Admin found successfully"));
   } catch (error) {
-    logger.error("Internal Server Error while fetching admin details", { stack: error.stack });
+    logger.error("Internal Server Error while fetching admin details", {
+      stack: error.stack,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -355,7 +390,12 @@ const getBillingUsersForAdmin = asyncHandler(async (req, res, next) => {
     const page = parseInt(req.query.page) || 1;
     const limit = 25;
     const offset = (page - 1) * limit;
-    logger.info("Querying billing users for admin", { admin_id, page, limit, offset });
+    logger.info("Querying billing users for admin", {
+      admin_id,
+      page,
+      limit,
+      offset,
+    });
     const { count, rows: billingUsers } = await BillingUser.findAndCountAll({
       where: { admin_id },
       limit,
@@ -366,7 +406,7 @@ const getBillingUsersForAdmin = asyncHandler(async (req, res, next) => {
       logger.error("Billing users not fetched successfully", {
         admin_id,
         page,
-        query: { ...req.query }
+        query: { ...req.query },
       });
       return next(new ApiError(400, "Not able to query billing users"));
     }
@@ -387,11 +427,11 @@ const getBillingUsersForAdmin = asyncHandler(async (req, res, next) => {
       admin_id,
       page,
       count,
-      totalPages
+      totalPages,
     });
     return res.status(200).json(
-        new ApiResponse(
-          200,
+      new ApiResponse(
+        200,
         {
           billingUsers: billingUserlist,
           pagination: {
@@ -402,13 +442,13 @@ const getBillingUsersForAdmin = asyncHandler(async (req, res, next) => {
           },
         },
         "BillingUsers fetched successfully"
-        )
-      );
+      )
+    );
   } catch (error) {
     logger.error("Internal Server Error while fetching billing users", {
       stack: error.stack,
       admin_id: req.admin_id,
-      page: req.query.page
+      page: req.query.page,
     });
     next(new ApiError(500, "Internal Server Error"));
   }
@@ -427,11 +467,11 @@ const getTransactionsForAdmin = asyncHandler(async (req, res, next) => {
       offset,
       order: [["datetime", "DESC"]],
     });
-    if(!transactions){
+    if (!transactions) {
       logger.error("Transactions not fetched successfully", {
         admin_id,
         page,
-        query: { ...req.query }
+        query: { ...req.query },
       });
       return next(new ApiError(400, "Not able to query transactions"));
     }
@@ -454,7 +494,7 @@ const getTransactionsForAdmin = asyncHandler(async (req, res, next) => {
       admin_id,
       page,
       count,
-      totalPages
+      totalPages,
     });
 
     return res.status(200).json(
@@ -476,7 +516,7 @@ const getTransactionsForAdmin = asyncHandler(async (req, res, next) => {
     logger.error("Internal Server Error while fetching transactions", {
       stack: error.stack,
       admin_id: req.admin_id,
-      page: req.query.page
+      page: req.query.page,
     });
     next(new ApiError(500, "Internal Server Error"));
   }
@@ -513,7 +553,13 @@ const getAllOrdersForAdmin = asyncHandler(async (req, res, next) => {
       if (Object.keys(where.created_at).length === 0) delete where.created_at;
     }
 
-    logger.info("Querying orders", { admin_id, page, limit, offset, filters: req.query });
+    logger.info("Querying orders", {
+      admin_id,
+      page,
+      limit,
+      offset,
+      filters: req.query,
+    });
 
     const { count, rows: orders } = await Order.findAndCountAll({
       where,
@@ -524,7 +570,13 @@ const getAllOrdersForAdmin = asyncHandler(async (req, res, next) => {
         {
           model: OrderItem,
           as: "order_items",
-          attributes: ["order_item_id", "product_id", "quantity", "unit_price", "total_price"]
+          attributes: [
+            "order_item_id",
+            "product_id",
+            "quantity",
+            "unit_price",
+            "total_price",
+          ],
         },
       ],
     });
@@ -547,7 +599,12 @@ const getAllOrdersForAdmin = asyncHandler(async (req, res, next) => {
 
     const totalPages = Math.ceil(count / limit);
 
-    logger.info("Orders queried successfully", { admin_id, page, count, totalPages });
+    logger.info("Orders queried successfully", {
+      admin_id,
+      page,
+      count,
+      totalPages,
+    });
 
     return res.status(200).json(
       new ApiResponse(
@@ -574,7 +631,7 @@ const getAllOrdersForAdmin = asyncHandler(async (req, res, next) => {
   }
 });
 
-// get all the billing user corresponding to the event 
+// get all the billing user corresponding to the event
 
 const getAllBillingUserForEvent = asyncHandler(async (req, res, next) => {
   try {
@@ -598,7 +655,9 @@ const getAllBillingUserForEvent = asyncHandler(async (req, res, next) => {
       );
     }
 
-    logger.info(`Fetched ${billingUsers.length} billing users for event_id: ${event_id}`);
+    logger.info(
+      `Fetched ${billingUsers.length} billing users for event_id: ${event_id}`
+    );
     return res
       .status(200)
       .json(
@@ -609,12 +668,13 @@ const getAllBillingUserForEvent = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    logger.error("Internal Server Error while fetching billing users for event", { stack: error.stack });
+    logger.error(
+      "Internal Server Error while fetching billing users for event",
+      { stack: error.stack }
+    );
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
-
 
 export {
   loginWithEmail,
@@ -627,5 +687,5 @@ export {
   getBillingUsersForAdmin,
   getAllBillingUserForEvent,
   getTransactionsForAdmin,
-  getAllOrdersForAdmin
+  getAllOrdersForAdmin,
 };

@@ -60,12 +60,16 @@ const createEmployee = asyncHandler(async (req, res, next) => {
       admin_id,
     });
 
-    logger.info("Employee created successfully", { employeeId: newEmployee.employee_id });
+    logger.info("Employee created successfully", {
+      employeeId: newEmployee.employee_id,
+    });
 
     // Fetch admin info
     const admin = await Admin.findByPk(admin_id);
     if (!admin) {
-      logger.error("Admin details not found for employee creation", { admin_id });
+      logger.error("Admin details not found for employee creation", {
+        admin_id,
+      });
       return next(new ApiError(500, "Unable to find admin details"));
     }
 
@@ -219,7 +223,8 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
 
       if (existingEmployee) {
         let msg = "";
-        if (existingEmployee.email === email) msg = "Email is already registered";
+        if (existingEmployee.email === email)
+          msg = "Email is already registered";
         else if (existingEmployee.mobile_no === mobile_no)
           msg = "Mobile number is already registered";
         else if (existingEmployee.username === username)
@@ -237,7 +242,8 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
 
     const updatedFields = [];
     if (email && email !== employee.email) updatedFields.push("email");
-    if (username && username !== employee.username) updatedFields.push("username");
+    if (username && username !== employee.username)
+      updatedFields.push("username");
     if (password) updatedFields.push("password");
 
     // Update employee record
@@ -257,7 +263,9 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       const admin_id = req.admin_id;
       const admin = await Admin.findByPk(admin_id);
       if (!admin) {
-        logger.error("Admin details not found for credentials update", { admin_id });
+        logger.error("Admin details not found for credentials update", {
+          admin_id,
+        });
         return next(new ApiError(500, "Unable to find admin details"));
       }
 
@@ -282,13 +290,15 @@ const updateEmployee = asyncHandler(async (req, res, next) => {
       logger.info("Credentials update email sent successfully", { employeeId });
     }
 
-    return res.status(201).json(
-      new ApiResponse(
-        201,
-        { employee: updatedEmployee },
-        "Employee updated successfully"
-      )
-    );
+    return res
+      .status(201)
+      .json(
+        new ApiResponse(
+          201,
+          { employee: updatedEmployee },
+          "Employee updated successfully"
+        )
+      );
   } catch (error) {
     logger.error("Error in updateEmployee", error);
     return next(new ApiError(500, "Internal Server Error", error));
@@ -407,13 +417,15 @@ const toggleEmployeeStatus = asyncHandler(async (req, res, next) => {
       newStatus: updatedemployee.is_active,
     });
 
-    return res.status(200).json(
-      new ApiResponse(
-        200,
-        { employee: updatedemployee },
-        "Employee status has been updated successfully"
-      )
-    );
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { employee: updatedemployee },
+          "Employee status has been updated successfully"
+        )
+      );
   } catch (error) {
     logger.error("Error in toggleEmployeeStatus", error);
     return next(new ApiError(500, "Internal Server Error", error));
@@ -423,7 +435,11 @@ const toggleEmployeeStatus = asyncHandler(async (req, res, next) => {
 const scanIssuedPass = asyncHandler(async (req, res, next) => {
   try {
     const { employee_id, subevent_id, attendee_id } = req.body;
-    logger.info("Scan issued pass request received", { employee_id, subevent_id, attendee_id });
+    logger.info("Scan issued pass request received", {
+      employee_id,
+      subevent_id,
+      attendee_id,
+    });
 
     // Validate subevent existence and date (must be today)
     const subevent = await SubEvent.findByPk(subevent_id);
@@ -447,11 +463,18 @@ const scanIssuedPass = asyncHandler(async (req, res, next) => {
     const employee = await Employee.findByPk(employee_id);
     if (!employee) {
       logger.warn(`Employee not found: ${employee_id}`);
-      return next(new ApiError(404, `Employee with id ${employee_id} not found`));
+      return next(
+        new ApiError(404, `Employee with id ${employee_id} not found`)
+      );
     }
     if (!employee.is_active) {
       logger.warn(`Inactive employee attempted scan: ${employee_id}`);
-      return next(new ApiError(403, `Employee with id ${employee_id} is inactive and cannot perform this action`));
+      return next(
+        new ApiError(
+          403,
+          `Employee with id ${employee_id} is inactive and cannot perform this action`
+        )
+      );
     }
 
     // Find issued pass
@@ -465,12 +488,24 @@ const scanIssuedPass = asyncHandler(async (req, res, next) => {
     });
 
     if (!issuedPass) {
-      logger.warn(`Valid issued pass not found for attendee ${attendee_id} and subevent ${subevent_id}`);
-      return next(new ApiError(404, "Valid issued pass not found for attendee and subevent"));
+      logger.warn(
+        `Valid issued pass not found for attendee ${attendee_id} and subevent ${subevent_id}`
+      );
+      return next(
+        new ApiError(
+          404,
+          "Valid issued pass not found for attendee and subevent"
+        )
+      );
     }
 
-    if (issuedPass.is_expired || !["active", "used"].includes(issuedPass.status)) {
-      logger.warn(`Issued pass ${issuedPass.issued_pass_id} is not valid for scanning`);
+    if (
+      issuedPass.is_expired ||
+      !["active", "used"].includes(issuedPass.status)
+    ) {
+      logger.warn(
+        `Issued pass ${issuedPass.issued_pass_id} is not valid for scanning`
+      );
       return next(new ApiError(400, "Issued pass is not valid for scanning"));
     }
 
@@ -486,21 +521,29 @@ const scanIssuedPass = asyncHandler(async (req, res, next) => {
     });
 
     if (existingCheck) {
-      logger.warn(`Issued pass ${issuedPass.issued_pass_id} already scanned today`);
+      logger.warn(
+        `Issued pass ${issuedPass.issued_pass_id} already scanned today`
+      );
       return next(new ApiError(400, "Pass already scanned for today"));
     }
 
     // Update used_count and create check-in record
     issuedPass.used_count = (issuedPass.used_count || 0) + 1;
     await issuedPass.save();
-    logger.info(`Issued pass ${issuedPass.issued_pass_id} used_count incremented`, { newUsedCount: issuedPass.used_count });
+    logger.info(
+      `Issued pass ${issuedPass.issued_pass_id} used_count incremented`,
+      { newUsedCount: issuedPass.used_count }
+    );
 
     await CheckingRecord.create({
       issued_pass_id: issuedPass.issued_pass_id,
       employee_id,
       checkin_time: new Date(),
     });
-    logger.info(`Check-in recorded for issued pass ${issuedPass.issued_pass_id}`, { employee_id });
+    logger.info(
+      `Check-in recorded for issued pass ${issuedPass.issued_pass_id}`,
+      { employee_id }
+    );
 
     return res
       .status(200)

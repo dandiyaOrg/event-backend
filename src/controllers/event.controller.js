@@ -10,7 +10,6 @@ import {
   Admin,
   Event,
   PassSubEvent,
-  EventBillingUsers,
 } from "../db/models/index.js";
 import {
   uploadOnCloudinary,
