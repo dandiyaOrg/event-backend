@@ -180,11 +180,11 @@ export const commonFields = {
     }),
 
   timeSchema: Joi.string()
-    .pattern(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/, "HH:MM:SS")
+    .pattern(/^([01]\d|2[0-3]):([0-5]\d)$/, "HH:MM")
     .required()
     .messages({
       "string.base": "{#label} must be a text",
-      "string.pattern.name": "{#label} must be in HH:MM:SS format",
+      "string.pattern.name": "{#label} must be in HH:MM format",
       "any.required": "{#label} is required",
     }),
 

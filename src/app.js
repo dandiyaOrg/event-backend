@@ -75,6 +75,7 @@ const corsOptions = {
     "refreshToken",
     "x-admin-id",
     "x-api-key",
+    "X-Client-Token",
   ],
   exposedHeaders: ["accessToken", "refreshToken", "X-Client-Token"], // instruct browsers which headers to expose to JS
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
