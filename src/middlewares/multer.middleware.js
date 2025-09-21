@@ -1,20 +1,18 @@
-// import multer from "multer";
-
-// const storage = multer.memoryStorage();
-
-// export const upload = multer({
-//   storage,
-//   limits: { fileSize: 2 * 1024 * 1024 },
-// });
-
 import multer from "multer";
+import fs from "fs";
+import path from "path";
+
+const tempDir = path.join(process.cwd(), "public", "temp");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "./public/temp");
+    // Check if directory exists, if not create it (recursive)
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    cb(null, tempDir);
   },
   filename: function (req, file, cb) {
-    // const uniqueSuffix = Date.now();
     cb(null, file.originalname);
   },
 });
