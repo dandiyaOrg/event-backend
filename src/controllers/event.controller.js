@@ -17,6 +17,7 @@ import {
   deletefromCloudinary,
 } from "../utils/clodinary.js";
 import { generateQRCodeAndUpload } from "../services/qrGenerator.service.js";
+import { logger } from "../app.js";
 
 const registerEvent = asyncHandler(async (req, res, next) => {
   try {
@@ -43,6 +44,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
         event_type
       )
     ) {
+      logger.warn("Missing required event fields in request body");
       return next(
         new ApiError(
           400,
@@ -52,8 +54,10 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     }
 
     if (!req.file) {
+      logger.warn("Event image not provided");
       return next(new ApiError(400, "Event image is required"));
     }
+
     const imagelocalPath = req.body.image;
     let imageUrl;
     if (imagelocalPath) {
@@ -61,18 +65,22 @@ const registerEvent = asyncHandler(async (req, res, next) => {
         const { success, data, error } =
           await uploadOnCloudinary(imagelocalPath);
         if (!success) {
+          logger.error("Failed to upload event image on Cloudinary", { error });
           return next(
             new ApiError(500, "Error on uploading design on clodinary", error)
           );
         }
         imageUrl = data;
+        logger.info("Event image uploaded successfully", { imageUrl });
       } catch (error) {
+        logger.error("Cloudinary upload exception", { error });
         return next(
           new ApiError(500, "Error on uploading design on clodinary", error)
         );
       }
     } else {
       imageUrl = null;
+      logger.info("No event image provided, continuing with null imageUrl");
     }
 
     // Create the event
@@ -90,11 +98,15 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     });
 
     if (!newEvent) {
+      logger.error("Failed to create event in DB");
       return next(new ApiError(400, "Failed to create event"));
     }
+    logger.info("Event created successfully in DB", { eventId: newEvent.event_id });
+
     const qrResult = await generateQRCodeAndUpload(newEvent.event_id);
 
     if (!qrResult.success) {
+      logger.error("QR code generation failed", { error: qrResult.error });
       return next(
         new ApiError(500, "Failed to generate event QR", qrResult.error)
       );
@@ -106,9 +118,16 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     const updatedEvent = await newEvent.save();
 
     if (!updatedEvent) {
+      logger.error("Failed to save updated event with QR info", { eventId: newEvent.event_id });
       return next(new ApiError(400, "Failed to create event"));
     }
+    logger.info("Event QR generated and event updated", {
+      eventId: updatedEvent.event_id,
+      eventUrl: updatedEvent.event_url,
+    });
+
     const admin = await Admin.findByPk(req.admin_id);
+
     const { emailData, error } = await sendMail(
       admin.email,
       "eventRegistration",
@@ -118,10 +137,17 @@ const registerEvent = asyncHandler(async (req, res, next) => {
       }
     );
     if (!emailData || !emailData.id) {
+      logger.error("Failed to send event registration email", { error });
       return next(
         new ApiError(502, "Failed to send credentials update email", error)
       );
     }
+
+    logger.info("Event created successfully and email sent", {
+      eventId: updatedEvent.event_id,
+      emailId: emailData.id,
+    });
+
     return res
       .status(200)
       .json(
@@ -132,7 +158,7 @@ const registerEvent = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
-    console.error(error);
+    logger.error("Internal server error during event registration", { error });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -141,33 +167,44 @@ const deleteEvent = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
     if (!eventId) {
+      logger.warn("Delete event request without eventId in params");
       return next(new ApiError(400, "Event ID is required in query params"));
     }
 
     const event = await Event.findByPk(eventId);
     if (!event) {
+      logger.warn("Event not found for deletion", { eventId });
       return next(new ApiError(404, "Event not found"));
     }
+
     const isDeleted = await deletefromCloudinary(
       [event.event_image, event.event_qr],
       "image"
     );
+
     if (!isDeleted) {
+      logger.error("Failed to delete event images from Cloudinary", {
+        eventId,
+        images: [event.event_image, event.event_qr],
+      });
       return next(
         new ApiError(500, "Failed to delete event images from cloud")
       );
     }
 
-    // Delete the event
     await Event.destroy({
       where: { event_id: eventId },
     });
 
+    logger.info("Event deleted successfully", { eventId });
     return res
       .status(200)
       .json(new ApiResponse(200, null, "Event deleted successfully"));
   } catch (error) {
-    console.error(error);
+    logger.error("Internal server error during event deletion", {
+      error,
+      eventId: req.params?.eventId,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -176,15 +213,27 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
+    if (!eventId) {
+      logger.warn("getEventDetailById called without eventId");
+      return next(new ApiError(400, "Event ID is required in params"));
+    }
+
     const event = await Event.findByPk(eventId);
 
     if (!event) {
+      logger.warn(`Event not found with id ${eventId}`);
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
+
+    logger.info("Event fetched successfully", { eventId });
     return res
       .status(200)
       .json(new ApiResponse(200, event, "Event fetched successfully"));
   } catch (error) {
+    logger.error("Internal server error in getEventDetailById", {
+      error,
+      eventId: req.params?.eventId,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -193,12 +242,16 @@ const updateEvent = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
     if (!eventId) {
+      logger.warn("updateEvent called without eventId");
       return next(new ApiError(400, "Event ID is required in params"));
     }
+
     const event = await Event.findByPk(eventId);
     if (!event) {
+      logger.warn(`Event not found for update`, { eventId });
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
+
     const {
       event_name,
       description,
@@ -218,6 +271,10 @@ const updateEvent = asyncHandler(async (req, res, next) => {
           const { success, data, error } =
             await uploadOnCloudinary(imagelocalPath);
           if (!success) {
+            logger.error("Failed to upload updated event image to Cloudinary", {
+              eventId,
+              error,
+            });
             return next(
               new ApiError(
                 500,
@@ -227,7 +284,12 @@ const updateEvent = asyncHandler(async (req, res, next) => {
             );
           }
           imageUrl = data;
+          logger.info("Updated event image uploaded successfully", {
+            eventId,
+            imageUrl,
+          });
         } catch (error) {
+          logger.error("Exception during event image upload", { eventId, error });
           return next(
             new ApiError(
               500,
@@ -240,6 +302,7 @@ const updateEvent = asyncHandler(async (req, res, next) => {
         imageUrl = null;
       }
     }
+
     const previousImage = event.event_image;
     const updatedEvent = await event.update({
       event_name: event_name ?? event.event_name,
@@ -253,59 +316,86 @@ const updateEvent = asyncHandler(async (req, res, next) => {
       event_image: imageUrl ?? previousImage,
     });
 
-    if (imageUrl) {
-      if (previousImage) {
-        await deletefromCloudinary([previousImage], "image");
-      }
+    if (imageUrl && previousImage) {
+      await deletefromCloudinary([previousImage], "image");
+      logger.info("Previous event image deleted from Cloudinary", { eventId });
     }
+
+    logger.info("Event updated successfully", { eventId });
     return res
       .status(200)
       .json(new ApiResponse(200, updatedEvent, "Event updated successfully"));
   } catch (error) {
+    logger.error("Internal server error during event update", {
+      error,
+      eventId: req.params?.eventId,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
+
+import logger from "../utils/logger.js"; // adjust path if needed
 
 const updateEventStatus = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
     if (!eventId) {
+      logger.warn("updateEventStatus called without eventId");
       return next(new ApiError(400, "Event ID is required in params"));
     }
+
     const event = await Event.findByPk(eventId);
     if (!event) {
+      logger.warn(`Event not found for status update`, { eventId });
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
+
     const { status } = req.body;
     const updatedEvent = await event.update({
       status: status ?? event.status,
     });
+
+    logger.info("Event status updated successfully", { eventId, status: updatedEvent.status });
     return res
       .status(200)
       .json(
         new ApiResponse(200, updatedEvent, "Event status updated successfully")
       );
   } catch (error) {
+    logger.error("Internal server error during event status update", {
+      error,
+      eventId: req.params?.eventId,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
 
+
 const getAllEventByAdmin = asyncHandler(async (req, res, next) => {
   try {
     const admin_id = req.admin_id;
+    if (!admin_id) {
+      logger.warn("getAllEventByAdmin called without admin_id");
+      return next(new ApiError(400, "Admin ID is required"));
+    }
+
     const events = await Event.findAll({
-      where: { admin_id: admin_id },
+      where: { admin_id },
     });
 
     if (!events || events.length === 0) {
+      logger.warn(`No events found for admin`, { admin_id });
       return next(
         new ApiError(404, `No events found for admin id ${admin_id}`)
       );
     }
+
+    logger.info("Events fetched successfully for admin", { admin_id, count: events.length });
     return res
       .status(200)
       .json(new ApiResponse(200, events, "Events fetched successfully"));
   } catch (error) {
+    logger.error("Internal server error while fetching events for admin", { error, admin_id: req.admin_id });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -313,25 +403,31 @@ const getAllEventByAdmin = asyncHandler(async (req, res, next) => {
 const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
   try {
     const { billingUserId, eventId } = req.body;
+
     if (!billingUserId) {
-      return next(400, "Billing User Id is required");
+      logger.warn("getAllSubeventsWithPasses called without billingUserId");
+      return next(new ApiError(400, "Billing User Id is required"));
     }
-    // Validate billing user exists
+
     const billingUser = await BillingUser.findByPk(billingUserId);
     if (!billingUser) {
+      logger.warn(`Billing user not found`, { billingUserId });
       return next(
         new ApiError(404, `Billing user with id ${billingUserId} not found`)
       );
     }
 
-    // Validate event exists
+    if (!eventId) {
+      logger.warn("getAllSubeventsWithPasses called without eventId");
+      return next(new ApiError(400, "Event ID is required"));
+    }
+
     const event = await Event.findByPk(eventId);
     if (!event) {
+      logger.warn(`Event not found`, { eventId });
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
 
-    // Optional: Check if billing user has access to this event
-    // You might want to add this validation based on your business logic
     const hasAccess = await EventBillingUsers.findOne({
       where: {
         event_id: eventId,
@@ -340,10 +436,13 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
     });
 
     if (!hasAccess) {
+      logger.warn(`Billing user does not have access to event`, {
+        billingUserId,
+        eventId,
+      });
       return next(new ApiError(403, "You don't have access to this event"));
     }
 
-    // Get subevents with their associated passes
     const subevents = await SubEvent.findAll({
       where: {
         event_id: eventId,
@@ -362,9 +461,9 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
       include: [
         {
           model: Pass,
-          as: "passes", // ← Make sure this matches your association alias
+          as: "passes",
           where: { is_active: true },
-          required: false, // LEFT JOIN - includes subevents even without passes
+          required: false,
           attributes: [
             "pass_id",
             "category",
@@ -381,10 +480,15 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
       ],
     });
 
-    // Convert to plain objects for better JSON response
     const subeventData = subevents.map((subevent) =>
       subevent.get({ plain: true })
     );
+
+    logger.info("Subevents with passes fetched successfully", {
+      eventId,
+      billingUserId,
+      count: subeventData.length,
+    });
 
     return res
       .status(200)
@@ -396,6 +500,11 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
+    logger.error("Internal server error in getAllSubeventsWithPasses", {
+      error,
+      billingUserId: req.body?.billingUserId,
+      eventId: req.body?.eventId,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -403,18 +512,23 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
 const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
   try {
     const { billingUserId, eventId } = req.body;
+
     if (!billingUserId) {
-      return next(400, "Billing User Id is required");
+      logger.warn("getGlobalPassForEvent called without billingUserId");
+      return next(new ApiError(400, "Billing User Id is required"));
     }
+
     if (!eventId) {
+      logger.warn("getGlobalPassForEvent called without eventId");
       return next(new ApiError(400, "Event ID is required in query params"));
     }
+
     const event = await Event.findByPk(eventId);
     if (!event) {
+      logger.warn("Event not found", { eventId });
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
 
-    // 2. Get subevents for this event
     const subevents = await SubEvent.findAll({
       where: { event_id: eventId },
       attributes: ["subevent_id"],
@@ -422,11 +536,10 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
 
     const subeventIds = subevents.map((s) => s.subevent_id);
     if (subeventIds.length === 0) {
+      logger.warn("No subevents found for event", { eventId });
       return next(new ApiError(404, "No subevents found for this event"));
     }
 
-    // 3. Find global passes linked to any subevent of this event
-    // Using the is_global field and checking if pass is linked to this event's subevents
     const globalPasses = await PassSubEvent.findAll({
       where: {
         subevent_id: { [Op.in]: subeventIds },
@@ -434,31 +547,27 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
       include: [
         {
           model: Pass,
-          as: "pass", // Use the alias from associations
+          as: "pass",
           where: {
             is_global: true,
-            is_active: true, // Only get active passes
+            is_active: true,
           },
           required: true,
         },
       ],
       attributes: ["pass_id"],
-      group: ["pass_id", "pass.pass_id"], // Group by pass to avoid duplicates
+      group: ["pass_id", "pass.pass_id"],
     });
 
     if (globalPasses.length === 0) {
-      return next(
-        new ApiError(404, "No active global pass found for this event")
-      );
+      logger.warn("No active global pass found for event", { eventId });
+      return next(new ApiError(404, "No active global pass found for this event"));
     }
 
-    // 4. For each global pass, verify it's linked to ALL subevents of this event
     let validGlobalPass = null;
 
     for (const passSubEvent of globalPasses) {
       const passId = passSubEvent.pass_id;
-
-      // Count how many subevents this pass is linked to
       const linkedSubeventsCount = await PassSubEvent.count({
         where: {
           pass_id: passId,
@@ -466,7 +575,6 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
         },
       });
 
-      // If this pass is linked to all subevents of the event, it's a valid global pass
       if (linkedSubeventsCount === subeventIds.length) {
         validGlobalPass = passSubEvent.pass;
         break;
@@ -474,13 +582,15 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
     }
 
     if (!validGlobalPass) {
+      logger.warn("No complete global pass found for event", { eventId });
       return next(
         new ApiError(404, "No complete global pass found for this event")
       );
     }
 
-    // 5. Return the global pass details
     const passData = validGlobalPass.get({ plain: true });
+
+    logger.info("Global pass fetched successfully", { eventId, billingUserId, passId: passData.pass_id });
 
     return res
       .status(200)
@@ -492,6 +602,11 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
         )
       );
   } catch (error) {
+    logger.error("Internal server error in getGlobalPassForEvent", {
+      error,
+      billingUserId: req.body?.billingUserId,
+      eventId: req.body?.eventId,
+    });
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
