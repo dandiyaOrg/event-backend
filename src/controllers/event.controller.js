@@ -441,21 +441,6 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
 
-    const hasAccess = await EventBillingUsers.findOne({
-      where: {
-        event_id: eventId,
-        billing_user_id: billingUserId,
-      },
-    });
-
-    if (!hasAccess) {
-      logger.warn(`Billing user does not have access to event`, {
-        billingUserId,
-        eventId,
-      });
-      return next(new ApiError(403, "You don't have access to this event"));
-    }
-
     const subevents = await SubEvent.findAll({
       where: {
         event_id: eventId,
