@@ -25,7 +25,7 @@ RUN apk add --no-cache curl
 RUN mkdir -p /app/logs && chown -R node:node /app/logs
 
 # create public directory for storing images and all
-RUN mkdir -p /public/tmp && chown -R node:node /public/tmp
+RUN mkdir -p /app/public/temp && chown -R node:node /app/public/temp
 
 # copy app and node_modules from builder stage
 COPY --from=builder --chown=node:node /app . 
