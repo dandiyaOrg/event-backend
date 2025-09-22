@@ -93,12 +93,20 @@ const emailTypeMap = {
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: process.env.SMTP_SECURE === "true",
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: String(process.env.SMTP_SECURE || "false") === "true", // true for 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: process.env.NODE_ENV === "production"
+  }
+});
+
+transporter.verify((err, success) => {
+  if (err) console.error("SMTP verify failed:", err);
+  else console.log("SMTP verified.");
 });
 
 const sendMail = async (

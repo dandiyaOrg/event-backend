@@ -24,55 +24,55 @@ if (process.env.DB_SSL === "true") {
     rejectUnauthorized: false,
   };
 }
-// const sequelize = connectionString
-//   ? new Sequelize(connectionString, {
-//       dialect: "postgres",
-//       logging: false,
-//       dialectOptions,
-//       pool: {
-//         max: poolMax,
-//         min: poolMin,
-//         acquire: poolAcquire,
-//         idle: poolIdle,
-//       },
-//       timezone: "+05:30",
-//     })
-//   : new Sequelize(
-//       process.env.POSTGRES_DB || process.env.DB_NAME || "appdb",
-//       process.env.POSTGRES_USER || process.env.DB_USERNAME || "appuser",
-//       process.env.POSTGRES_PASSWORD ||
-//         process.env.DB_PASSWORD ||
-//         "strongpassword!",
-//       {
-//         host: process.env.POSTGRES_HOST || process.env.DB_HOST || "postgres",
-//         port: process.env.POSTGRES_PORT
-//           ? parseInt(process.env.POSTGRES_PORT, 10)
-//           : 5432,
-//         dialect: "postgres",
-//         logging: false,
-//         dialectOptions,
-//         pool: {
-//           max: poolMax,
-//           min: poolMin,
-//           acquire: poolAcquire,
-//           idle: poolIdle,
-//         },
-//         timezone: "+05:30",
-//       }
-//     );
+const sequelize = connectionString
+  ? new Sequelize(connectionString, {
+      dialect: "postgres",
+      logging: false,
+      dialectOptions,
+      pool: {
+        max: poolMax,
+        min: poolMin,
+        acquire: poolAcquire,
+        idle: poolIdle,
+      },
+      timezone: "+05:30",
+    })
+  : new Sequelize(
+      process.env.POSTGRES_DB || process.env.DB_NAME || "appdb",
+      process.env.POSTGRES_USER || process.env.DB_USERNAME || "appuser",
+      process.env.POSTGRES_PASSWORD ||
+        process.env.DB_PASSWORD ||
+        "strongpassword!",
+      {
+        host: process.env.POSTGRES_HOST || process.env.DB_HOST || "postgres",
+        port: process.env.POSTGRES_PORT
+          ? parseInt(process.env.POSTGRES_PORT, 10)
+          : 5432,
+        dialect: "postgres",
+        logging: false,
+        dialectOptions,
+        pool: {
+          max: poolMax,
+          min: poolMin,
+          acquire: poolAcquire,
+          idle: poolIdle,
+        },
+        timezone: "+05:30",
+      }
+    );
 
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
-  dialect: "postgres",
-  logging: false,
-  dialectOptions: {
-    ssl: {
-      require: true,
-      rejectUnauthorized: false,
-    },
-  },
-  pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
-  timezone: "+05:30",
-});
+// const sequelize = new Sequelize(process.env.DATABASE_URL, {
+//   dialect: "postgres",
+//   logging: false,
+//   dialectOptions: {
+//     ssl: {
+//       require: true,
+//       rejectUnauthorized: false,
+//     },
+//   },
+//   pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
+//   timezone: "+05:30",
+// });
 const connectDB = async () => {
   try {
     const host = process.env.POSTGRES_HOST || process.env.DB_HOST || "postgres";

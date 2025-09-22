@@ -119,7 +119,10 @@ app.use((req, res, next) => {
   }
   next();
 });
-
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 import adminRoutes from "./routes/admin.routes.js";
 import eventRoutes from "./routes/event.routes.js";
 import employeeRoutes from "./routes/emp.routes.js";
