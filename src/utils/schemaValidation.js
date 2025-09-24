@@ -123,14 +123,23 @@ export const commonFields = {
     }),
 
   pass_category: Joi.string()
-    .valid("Group", "Stag Male", "Stag Female", "Couple", "Full Pass")
+    .valid(
+      "Group",
+      "Stag Male",
+      "Stag Female",
+      "Couple",
+      "Full Stag Male",
+      "Full Stag Female",
+      "Full Couple",
+      "Full Group"
+    )
     .required()
     .messages({
       // Fixed typo: was .message() now .messages()
       "string.base": "{#label} must be a text",
       "string.empty": "{#label} is required",
       "any.only":
-        "{#label} must be one of: Group, Stag Male, Stag Female, Couple, Full Pass",
+        "{#label} must be one of: Group,Stag Male,Stag Female, Couple, Full Stag Male, Full Stag Female, Full Couple, Full Group",
       "any.required": "{#label} is required",
     }),
 
@@ -383,7 +392,7 @@ const createOrderSchema = Joi.object({
   attendees: Joi.array()
     .items(attendeeSchema)
     .min(1)
-    .max(5)
+    .max(10)
     .required()
     .label("Attendees")
     .messages({
@@ -401,7 +410,7 @@ const createGlobalPassOrderSchema = Joi.object({
   attendees: Joi.array()
     .items(attendeeGlobalPassSchema)
     .min(1)
-    .max(5)
+    .max(10)
     .required()
     .label("Attendees")
     .messages({
@@ -433,7 +442,13 @@ const createPass = Joi.object({
 
 const updatePassvalidation = Joi.object({
   discount_percentage: commonFields.discount_percentage,
-});
+  total_price: commonFields.amount.label("Total Price"),
+})
+  .optional()
+  .min(1)
+  .messages({
+    "object.min": "At least one field must be provided for update",
+  });
 
 const scanPassSchema = Joi.object({
   employee_id: commonFields.idSchema.label("Employee Id"),

@@ -183,12 +183,119 @@ const Event = sequelize.define(
     ],
     hooks: {
       beforeValidate: (event, options) => {
-        // Calculate number of days automatically if not provided
-        if (event.date_start && event.date_end && !event.number_of_days) {
-          const start = new Date(event.date_start);
-          const end = new Date(event.date_end);
-          const timeDiff = end.getTime() - start.getTime();
-          event.number_of_days = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
+        // helper: parse many common inputs and return { year, month, day } or null
+        const parseToYMD = (input) => {
+          if (!input) return null;
+
+          // If it's already a Date object
+          if (input instanceof Date && !Number.isNaN(input.getTime())) {
+            return {
+              year: input.getFullYear(),
+              month: input.getMonth() + 1,
+              day: input.getDate(),
+            };
+          }
+
+          const s = String(input).trim();
+
+          // Try YYYY-MM-DD or similar (ISO)
+          const isoMatch = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+          if (isoMatch) {
+            return {
+              year: Number(isoMatch[1]),
+              month: Number(isoMatch[2]),
+              day: Number(isoMatch[3]),
+            };
+          }
+
+          // Try DD-MM-YYYY or DD/MM/YYYY
+          const dmyMatch = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+          if (dmyMatch) {
+            return {
+              year: Number(dmyMatch[3]),
+              month: Number(dmyMatch[2]),
+              day: Number(dmyMatch[1]),
+            };
+          }
+
+          // Fallback to Date.parse (may interpret timezones) then extract YMD
+          const parsed = new Date(s);
+          if (!Number.isNaN(parsed.getTime())) {
+            return {
+              year: parsed.getFullYear(),
+              month: parsed.getMonth() + 1,
+              day: parsed.getDate(),
+            };
+          }
+
+          return null;
+        };
+
+        // Converts YMD -> normalized YYYY-MM-DD string (using UTC day to avoid timezone shifts)
+        const ymdToIsoDate = ({ year, month, day }) => {
+          if (![year, month, day].every(Number.isFinite)) return null;
+          // Use Date.UTC to avoid local timezone causing previous/next-day issues
+          const ms = Date.UTC(year, month - 1, day);
+          const iso = new Date(ms).toISOString().split("T")[0];
+          return iso;
+        };
+
+        // If either date missing, nothing to do here (validators will catch missing required fields)
+        if (!event.date_start && !event.date_end) return;
+
+        // Normalize start
+        if (event.date_start) {
+          const parsed = parseToYMD(event.date_start);
+          if (!parsed) {
+            // invalid date format -> let validators handle this (isDate), or optionally throw here
+            return;
+          }
+          const normStart = ymdToIsoDate(parsed);
+          if (!normStart) return;
+          event.date_start = normStart; // write normalized YYYY-MM-DD
+        }
+
+        // Normalize end
+        if (event.date_end) {
+          const parsed = parseToYMD(event.date_end);
+          if (!parsed) {
+            return;
+          }
+          const normEnd = ymdToIsoDate(parsed);
+          if (!normEnd) return;
+          event.date_end = normEnd;
+        }
+
+        // at this point date_start and date_end (if present) are normalized strings 'YYYY-MM-DD'
+        if (event.date_start && event.date_end) {
+          const startMs = Date.UTC(
+            Number(event.date_start.substring(0, 4)),
+            Number(event.date_start.substring(5, 7)) - 1,
+            Number(event.date_start.substring(8, 10))
+          );
+          const endMs = Date.UTC(
+            Number(event.date_end.substring(0, 4)),
+            Number(event.date_end.substring(5, 7)) - 1,
+            Number(event.date_end.substring(8, 10))
+          );
+
+          if (endMs < startMs) {
+            // keep consistent with validators: throw validation error so caller knows
+            throw new ValidationError(
+              "End date must be the same as or after start date"
+            );
+          }
+
+          const MS_PER_DAY = 24 * 60 * 60 * 1000;
+          const inclusiveDays = Math.floor((endMs - startMs) / MS_PER_DAY) + 1;
+
+          // If number_of_days is not present or doesn't match, set the computed value
+          if (
+            !event.number_of_days ||
+            Number(event.number_of_days) !== inclusiveDays
+          ) {
+            event.number_of_days = inclusiveDays;
+          }
         }
       },
     },

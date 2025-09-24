@@ -17,6 +17,8 @@ import {
 } from "../utils/clodinary.js";
 import { generateQRCodeAndUpload } from "../services/qrGenerator.service.js";
 import { logger } from "../app.js";
+import { validate as isUUID } from "uuid";
+import { convertToDateOnlyIST } from "../services/dateconversion.service.js";
 
 const registerEvent = asyncHandler(async (req, res, next) => {
   try {
@@ -454,6 +456,7 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
         "end_time",
         "day",
         "available_quantity",
+        "images",
       ],
       include: [
         {
@@ -510,12 +513,12 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
   try {
     const { billingUserId, eventId } = req.body;
 
-    if (!billingUserId) {
+    if (!billingUserId && !isUUID(billingUserId)) {
       logger.warn("getGlobalPassForEvent called without billingUserId");
       return next(new ApiError(400, "Billing User Id is required"));
     }
 
-    if (!eventId) {
+    if (!eventId && !isUUID(eventId)) {
       logger.warn("getGlobalPassForEvent called without eventId");
       return next(new ApiError(400, "Event ID is required in query params"));
     }
@@ -528,82 +531,106 @@ const getGlobalPassForEvent = asyncHandler(async (req, res, next) => {
 
     const subevents = await SubEvent.findAll({
       where: { event_id: eventId },
-      attributes: ["subevent_id"],
+      attributes: ["subevent_id", "date"],
+      order: [["date", "ASC"]],
     });
 
-    const subeventIds = subevents.map((s) => s.subevent_id);
-    if (subeventIds.length === 0) {
+    if (!subevents || subevents.length === 0) {
       logger.warn("No subevents found for event", { eventId });
       return next(new ApiError(404, "No subevents found for this event"));
     }
+    const todayStr = convertToDateOnlyIST(new Date());
+    const remainingSubevents = subevents.filter((s) => {
+      const seDateStr = s.date ? convertToDateOnlyIST(s.date) : null;
+      return seDateStr && seDateStr >= todayStr;
+    });
 
-    const globalPasses = await PassSubEvent.findAll({
-      where: {
-        subevent_id: { [Op.in]: subeventIds },
-      },
+    const remainingIds = remainingSubevents.map((s) => s.subevent_id);
+
+    if (remainingIds.length === 0) {
+      logger.info("No remaining subevents for event", { eventId });
+      return next(new ApiError(404, "No remaining subevents for this event"));
+    }
+    const passSubEvents = await PassSubEvent.findAll({
+      where: { subevent_id: { [Op.in]: remainingIds } },
       include: [
         {
           model: Pass,
           as: "pass",
-          where: {
-            is_global: true,
-            is_active: true,
-          },
+          where: { is_global: true, is_active: true },
           required: true,
         },
       ],
-      attributes: ["pass_id"],
-      group: ["pass_id", "pass.pass_id"],
     });
-
-    if (globalPasses.length === 0) {
-      logger.warn("No active global pass found for event", { eventId });
+    if (!passSubEvents || passSubEvents.length === 0) {
+      logger.warn("No active global pass found for remaining subevents", {
+        eventId,
+      });
       return next(
-        new ApiError(404, "No active global pass found for this event")
+        new ApiError(404, "No active global pass found for remaining subevents")
       );
     }
-
-    let validGlobalPass = null;
-
-    for (const passSubEvent of globalPasses) {
-      const passId = passSubEvent.pass_id;
-      const linkedSubeventsCount = await PassSubEvent.count({
-        where: {
-          pass_id: passId,
-          subevent_id: { [Op.in]: subeventIds },
-        },
-      });
-
-      if (linkedSubeventsCount === subeventIds.length) {
-        validGlobalPass = passSubEvent.pass;
-        break;
+    const passMap = new Map(); // passId -> { pass: plainPass, coveredIds: Set }
+    for (const pse of passSubEvents) {
+      const pid = pse.pass_id;
+      if (!passMap.has(pid)) {
+        const plainPass = pse.pass ? pse.pass.get({ plain: true }) : null;
+        passMap.set(pid, { pass: plainPass, coveredIds: new Set() });
+      }
+      passMap.get(pid).coveredIds.add(pse.subevent_id);
+    }
+    for (const [pid, info] of passMap.entries()) {
+      if (info.coveredIds.size === remainingIds.length) {
+        logger.info("Complete global pass found for event", {
+          eventId,
+          passId: pid,
+        });
+        return res
+          .status(200)
+          .json(
+            new ApiResponse(
+              200,
+              { pass: info.pass },
+              "Complete global pass fetched successfully"
+            )
+          );
       }
     }
 
-    if (!validGlobalPass) {
-      logger.warn("No complete global pass found for event", { eventId });
-      return next(
-        new ApiError(404, "No complete global pass found for this event")
-      );
+    const passes = [];
+    for (const [pid, info] of passMap.entries()) {
+      passes.push({
+        pass: info.pass,
+        covered_subevent_ids: Array.from(info.coveredIds),
+        coverage_count: info.coveredIds.size,
+        coverage_ratio: +(info.coveredIds.size / remainingIds.length).toFixed(
+          3
+        ),
+      });
     }
 
-    const passData = validGlobalPass.get({ plain: true });
+    // Sort passes by coverage_count descending, so best match is first
+    passes.sort((a, b) => b.coverage_count - a.coverage_count);
 
-    logger.info("Global pass fetched successfully", {
+    logger.info("Partial global passes found for event", {
       eventId,
       billingUserId,
-      passId: passData.pass_id,
+      candidatePasses: passes.map((p) => ({
+        pass_id: p.pass.pass_id,
+        coverage_count: p.coverage_count,
+      })),
     });
 
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          { pass: passData },
-          "Global pass fetched successfully"
-        )
-      );
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          remaining_subevent_ids: remainingIds,
+          pass: passes,
+        },
+        "Partial global pass coverage found for remaining subevents"
+      )
+    );
   } catch (error) {
     logger.error("Internal server error in getGlobalPassForEvent", {
       error,

@@ -17,12 +17,26 @@ const Pass = sequelize.define(
         "Stag Male",
         "Stag Female",
         "Couple",
-        "Full Pass"
+        "Full Stag Male",
+        "Full Stag Female",
+        "Full Couple",
+        "Full Group"
       ),
       allowNull: false,
       validate: {
         notEmpty: true,
-        isIn: [["Group", "Stag Male", "Stag Female", "Couple", "Full Pass"]],
+        isIn: [
+          [
+            "Group",
+            "Stag Male",
+            "Stag Female",
+            "Couple",
+            "Full Stag Male",
+            "Full Stag Female",
+            "Full Couple",
+            "Full Group",
+          ],
+        ],
       },
     },
     total_price: {

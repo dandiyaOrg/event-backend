@@ -22,9 +22,6 @@ const BillingUser = sequelize.define(
       validate: {
         notEmpty: true,
         len: [2, 100],
-        isAlpha: {
-          msg: "Name should contain only letters and spaces",
-        },
       },
     },
     mobile_no: {

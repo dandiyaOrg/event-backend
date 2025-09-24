@@ -17,14 +17,11 @@ const Attendee = sequelize.define(
       validate: {
         notEmpty: true,
         len: [2, 100],
-        isAlpha: {
-          msg: "Name should contain only letters and spaces",
-        },
       },
     },
     whatsapp: {
       type: DataTypes.STRING(15),
-      allowNull: true,
+      allowNull: false,
       validate: {
         isNumeric: true,
         len: [10, 15],
@@ -32,7 +29,7 @@ const Attendee = sequelize.define(
     },
     email: {
       type: DataTypes.STRING(255),
-      allowNull: false,
+      allowNull: true,
       validate: {
         isEmail: true,
         notEmpty: true,

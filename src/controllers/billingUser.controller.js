@@ -127,9 +127,72 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         );
       }
 
-      // 3. Validate total amount
-      const calculatedTotal = parseFloat(pass.final_price) * attendees.length;
-      if (parseFloat(total_amount).toFixed(2) !== calculatedTotal.toFixed(2)) {
+      // 3. Compute remaining subevents (date >= today) for the event
+      const allSubevents = await SubEvent.findAll({
+        where: { event_id },
+        attributes: ["subevent_id", "date"],
+        order: [["date", "ASC"]],
+        transaction: t,
+      });
+
+      if (!allSubevents || allSubevents.length === 0) {
+        logger.warn(`No subevents found for event ${event_id}`);
+        await t.rollback();
+        return next(new ApiError(404, "No subevents found for this event"));
+      }
+
+      const todayStr = convertToDateOnlyIST(new Date());
+
+      const remainingSubevents = allSubevents.filter((s) => {
+        const seDateStr = s.date ? convertToDateOnlyIST(s.date) : null;
+        return seDateStr && seDateStr >= todayStr;
+      });
+
+      const remainingIds = remainingSubevents.map((s) => s.subevent_id);
+
+      if (remainingIds.length === 0) {
+        logger.warn(`No remaining subevents for event ${event_id}`);
+        await t.rollback();
+        return next(new ApiError(400, "No remaining subevents for this event"));
+      }
+
+      // 4. Ensure the pass actually covers ALL remaining subevents (true global for remaining days)
+      const coveredCount = await PassSubEvent.count({
+        where: {
+          pass_id,
+          subevent_id: { [Op.in]: remainingIds },
+        },
+        transaction: t,
+      });
+
+      if (coveredCount < remainingIds.length) {
+        logger.warn(
+          `Pass ${pass_id} does not cover all remaining subevents for event ${event_id} (covers ${coveredCount}/${remainingIds.length})`
+        );
+        await t.rollback();
+        return next(
+          new ApiError(
+            400,
+            `Selected pass is not valid for all remaining subevents of this event`
+          )
+        );
+      }
+
+      // 5. Validate total amount: use pass.final_price or pass.total_price depending on your model
+      const passUnitPrice = Number.parseFloat(
+        pass.final_price ?? pass.total_price ?? 0
+      );
+      if (Number.isNaN(passUnitPrice) || passUnitPrice < 0) {
+        logger.warn(`Invalid pass unit price for pass ${pass_id}`);
+        await t.rollback();
+        return next(new ApiError(500, "Pass pricing invalid"));
+      }
+      const calculatedTotal = passUnitPrice * attendees.length;
+
+      if (
+        Number(parseFloat(total_amount)).toFixed(2) !==
+        Number(calculatedTotal).toFixed(2)
+      ) {
         logger.warn(
           `Total amount mismatch: received ${total_amount}, expected ${calculatedTotal}`
         );
@@ -166,6 +229,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       );
       if (!EventBillingUser) {
         logger.error(`Failed to create Event BillingUser`);
+        await t.rollback();
         return next(new ApiError(400, "Failed to Create EventBillingUser"));
       }
       // 5. Create single OrderItem for the global pass
@@ -180,28 +244,30 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         { transaction: t }
       );
 
-      // 6. Process attendees
-      const eventSubevents = await SubEvent.findAll({
-        where: { event_id },
-        attributes: ["subevent_id"],
-        transaction: t,
-      });
-      const totalSubeventCount = eventSubevents.length;
-      const eventSubeventIds = eventSubevents.map((s) => s.subevent_id);
+      const attendeeObjects = [];
 
       for (const attendeeData of attendees) {
-        const normalizedEmail = attendeeData.email.toLowerCase().trim();
+        const normalizedEmail = attendeeData.email
+          ? attendeeData.email.toLowerCase().trim()
+          : null;
         const normalizedWhatsapp = attendeeData.whatsapp
           ? attendeeData.whatsapp.trim()
           : null;
 
-        let attendee = await Attendee.findOne({
-          where: {
-            whatsapp: normalizedWhatsapp,
-            email: normalizedEmail,
-          },
-          transaction: t,
-        });
+        // Try to find by email first, otherwise by whatsapp
+        let attendee = null;
+        if (normalizedEmail) {
+          attendee = await Attendee.findOne({
+            where: { email: normalizedEmail },
+            transaction: t,
+          });
+        }
+        if (!attendee && normalizedWhatsapp) {
+          attendee = await Attendee.findOne({
+            where: { whatsapp: normalizedWhatsapp },
+            transaction: t,
+          });
+        }
 
         if (!attendee) {
           attendee = await Attendee.create(
@@ -212,30 +278,35 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
             },
             { transaction: t }
           );
-          logger.info(`Attendee created: ${normalizedEmail}`);
+          logger.info(
+            `Attendee created: ${normalizedEmail ?? normalizedWhatsapp}`
+          );
         }
 
-        const linkedSubeventCount = await SubEventAttendee.count({
+        // Count how many of the remaining subevents this attendee already linked to
+        const linkedRemainingCount = await SubEventAttendee.count({
           where: {
             attendee_id: attendee.attendee_id,
-            subevent_id: { [Op.in]: eventSubeventIds },
+            subevent_id: { [Op.in]: remainingIds },
           },
           transaction: t,
         });
 
-        if (linkedSubeventCount === totalSubeventCount) {
+        // If attendee already linked to all remaining subevents -> already has global pass for remaining
+        if (linkedRemainingCount === remainingIds.length) {
           logger.warn(
-            `Attendee ${normalizedEmail} already has a global pass for this event`
+            `Attendee ${normalizedEmail} already has a global pass for remaining subevents of event ${event_id}`
           );
           await t.rollback();
           return next(
             new ApiError(
               400,
-              `Attendee with email ${normalizedEmail} already assigned a global pass for this event`
+              `Attendee with email ${normalizedEmail} already assigned a global pass for the remaining subevents of this event`
             )
           );
         }
 
+        // Link order-item -> attendee
         await OrderItemAttendee.findOrCreate({
           where: {
             order_item_id: orderItem.order_item_id,
@@ -246,13 +317,15 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           },
           transaction: t,
         });
-      }
 
+        attendeeObjects.push(attendee.get({ plain: true }));
+      } // end attendees loop
+
+      // All DB operations done — commit
       await t.commit();
       logger.info(
         `Global pass order completed successfully for order_id: ${order.order_id}`
       );
-
       return res
         .status(201)
         .json(
@@ -344,7 +417,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     let calculatedTotal = 0;
     for (const pass of passes) {
       const qty = passQtyMap.get(pass.pass_id);
-      if (qty > 5) {
+      if (qty > 10) {
         logger.warn(
           `Pass quantity exceeds limit of 5 for pass_id: ${pass.pass_id}`
         );

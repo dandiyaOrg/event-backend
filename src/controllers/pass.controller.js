@@ -1,9 +1,16 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { Pass, SubEvent, PassSubEvent, Event } from "../db/models/index.js";
+import {
+  Pass,
+  SubEvent,
+  PassSubEvent,
+  Event,
+  sequelize,
+} from "../db/models/index.js";
 import { Op } from "sequelize";
 import { logger } from "../app.js";
+import { convertToDateOnlyIST } from "../services/dateconversion.service.js";
 const createNewPass = asyncHandler(async (req, res, next) => {
   try {
     const {
@@ -31,99 +38,211 @@ const createNewPass = asyncHandler(async (req, res, next) => {
           : false;
 
     if (isGlobalBool) {
-      logger.info("Processing global pass creation...");
-
       if (!event_id) {
         logger.warn("Global pass creation failed: event_id missing");
         return next(
           new ApiError(400, "event_id is required when is_global is true")
         );
       }
+      const subevents = await SubEvent.findAll({
+        where: { event_id },
+        order: [["date", "ASC"]],
+      });
 
-      const event = await Event.findByPk(event_id);
-      if (!event) {
-        logger.warn(`Global pass creation failed: Event ${event_id} not found`);
-        return next(new ApiError(400, `Event with id ${event_id} not found`));
-      }
-
-      const subevents = await SubEvent.findAll({ where: { event_id } });
-
-      if (subevents.length < event.number_of_days) {
+      if (!subevents || subevents.length === 0) {
         logger.warn(
-          `Global pass creation failed: subevents(${subevents.length}) < event.number_of_days(${event.number_of_days})`
+          `Global pass creation failed: no subevents found for event ${event_id}`
+        );
+        return next(new ApiError(400, "No subevents found for this event"));
+      }
+      const todayStr = convertToDateOnlyIST(new Date());
+
+      // remaining subevents are those with date >= today (treat today as remaining)
+      const remainingSubevents = subevents.filter((se) => {
+        const seDateStr = se.date ? convertToDateOnlyIST(se.date) : null;
+        return seDateStr && seDateStr >= todayStr;
+      });
+
+      const remainingIds = remainingSubevents.map((s) => s.subevent_id);
+      if (remainingIds.length === 0) {
+        logger.warn(
+          `Global pass creation failed: no remaining subevents for event ${event_id}`
         );
         return next(
           new ApiError(
             400,
-            `Cannot create global pass: number of subevents (${subevents.length}) is less than event.number_of_days (${event.number_of_days})`
+            "No remaining subevents to create a global pass for"
           )
         );
       }
-
-      const existingGlobalPass = await Pass.findOne({
-        where: {
-          is_global: true,
-          is_active: true,
-        },
-        include: [
-          {
-            model: PassSubEvent,
-            as: "passSubEvents",
+      await sequelize
+        .transaction(async (t) => {
+          // find active global passes that include any of the remaining subevents
+          const overlappingActivePasses = await Pass.findAll({
             where: {
-              subevent_id: {
-                [Op.in]: subevents.map((se) => se.subevent_id),
-              },
+              is_global: true,
+              is_active: true,
             },
-            required: true,
-          },
-        ],
-      });
+            include: [
+              {
+                model: PassSubEvent,
+                as: "passSubEvents",
+                where: {
+                  subevent_id: { [Op.in]: remainingIds },
+                },
+                required: true,
+              },
+            ],
+            transaction: t,
+            lock: t.LOCK.UPDATE, // lock selected rows to avoid race
+          });
 
-      if (existingGlobalPass) {
-        logger.warn(
-          `Global pass creation failed: Already exists for event ${event_id}`
-        );
-        return next(
-          new ApiError(
-            400,
-            "A global pass already exists for this event. Cannot create duplicate."
-          )
-        );
-      }
+          if (overlappingActivePasses && overlappingActivePasses.length > 0) {
+            // deactivate those old passes (business decision: automatically deactivate)
+            const overlappingIds = overlappingActivePasses.map(
+              (p) => p.pass_id
+            );
+            logger.info(
+              `Deactivating ${overlappingIds.length} existing active global pass(es) (${overlappingIds.join(
+                ","
+              )}) that cover remaining subevents for event ${event_id}`
+            );
 
-      const passValidity = validity ?? event.number_of_days ?? 1;
-      const pass = await Pass.create({
-        category: "Group",
-        total_price,
-        discount_percentage,
-        validity: passValidity,
-        is_active: is_active ?? false,
-        is_global: true,
-      });
+            await Pass.update(
+              { is_active: false },
+              {
+                where: { pass_id: { [Op.in]: overlappingIds } },
+                transaction: t,
+              }
+            );
+          }
 
-      const passSubEventEntries = subevents.map((subev) => ({
-        pass_id: pass.pass_id,
-        subevent_id: subev.subevent_id,
-      }));
+          // After deactivating previous active passes, recompute coverage of remaining subevents
+          // (This ensures we don't block creation because of pre-existing active coverage.)
+          const coveredPassSubEvents = await PassSubEvent.findAll({
+            where: {
+              subevent_id: { [Op.in]: remainingIds },
+            },
+            include: [
+              {
+                model: Pass,
+                as: "pass",
+                where: { is_global: true, is_active: true },
+                required: true,
+              },
+              {
+                model: SubEvent,
+                as: "subevent",
+                where: {
+                  date: { [Op.gte]: todayStr },
+                  event_id,
+                },
+                required: true,
+              },
+            ],
+            transaction: t,
+            lock: t.LOCK.SHARE, // shared lock while reading
+          });
 
-      await PassSubEvent.bulkCreate(passSubEventEntries, {
-        ignoreDuplicates: true,
-      });
+          const coveredSet = new Set(
+            coveredPassSubEvents.map((p) => p.subevent_id)
+          );
+          const uncoveredRemainingIds = remainingIds.filter(
+            (id) => !coveredSet.has(id)
+          );
 
-      logger.info(
-        `Global pass created successfully | pass_id: ${pass.pass_id}, linked subevents: ${subevents.length}`
-      );
+          // enforce your business rules
+          if (uncoveredRemainingIds.length === 0) {
+            logger.warn(
+              `Global pass creation failed (after deactivating): active global pass(es) already cover all remaining subevents for event ${event_id}`
+            );
+            throw new ApiError(
+              400,
+              "Cannot create global pass: an active global pass already covers all remaining subevents."
+            ); // thrown inside transaction -> will rollback
+          }
 
-      const data = pass.get({ plain: true });
-      return res
-        .status(200)
-        .json(
-          new ApiResponse(
-            200,
-            { data },
-            "Global Pass Created and linked to all subevents"
-          )
-        );
+          if (uncoveredRemainingIds.length <= 1) {
+            logger.warn(
+              `Global pass creation failed: uncovered remaining subevents (${uncoveredRemainingIds.length}) <= 1`
+            );
+            throw new ApiError(
+              400,
+              "Cannot create global pass: not enough uncovered remaining subevents (<=1)"
+            );
+          }
+
+          // determine validity
+          const providedValidity =
+            validity !== undefined && validity !== null
+              ? Number(validity)
+              : undefined;
+          const passValidity =
+            providedValidity !== undefined && !Number.isNaN(providedValidity)
+              ? providedValidity
+              : (uncoveredRemainingIds.length ?? 1);
+
+          if (passValidity > uncoveredRemainingIds.length) {
+            logger.warn(
+              `Global pass creation failed: requested validity (${passValidity}) exceeds uncovered remaining subevents (${uncoveredRemainingIds.length})`
+            );
+            throw new ApiError(
+              400,
+              `Validity cannot exceed number of uncovered remaining subevents (${uncoveredRemainingIds.length}).`
+            );
+          }
+
+          // create pass and link to uncovered remaining subevents
+          const pass = await Pass.create(
+            {
+              category,
+              total_price,
+              discount_percentage,
+              validity: passValidity,
+              is_active: is_active ?? false,
+              is_global: true,
+            },
+            { transaction: t }
+          );
+
+          const passSubEventEntries = uncoveredRemainingIds.map((sid) => ({
+            pass_id: pass.pass_id,
+            subevent_id: sid,
+          }));
+
+          await PassSubEvent.bulkCreate(passSubEventEntries, {
+            ignoreDuplicates: true,
+            transaction: t,
+          });
+
+          logger.info(
+            `Global pass created successfully | pass_id: ${pass.pass_id}, linked uncovered remaining subevents: ${uncoveredRemainingIds.length}`
+          );
+
+          // return data (this return value becomes the resolved value of sequelize.transaction)
+          const data = pass.get({ plain: true });
+          return data;
+        }) // end transaction
+        .then((data) => {
+          return res
+            .status(200)
+            .json(
+              new ApiResponse(
+                200,
+                { data },
+                "Global Pass Created and linked to uncovered remaining subevents"
+              )
+            );
+        })
+        .catch((err) => {
+          // If err is ApiError we pass it to next, else convert to 500
+          if (err instanceof ApiError) return next(err);
+          logger.error("Error creating global pass", {
+            stack: err.stack,
+            message: err.message,
+          });
+          return next(new ApiError(500, "Internal Server Error", err));
+        });
     } else {
       logger.info("Processing non-global pass creation...");
 
@@ -347,7 +466,7 @@ const togglePass = asyncHandler(async (req, res, next) => {
 const updatePass = asyncHandler(async (req, res, next) => {
   try {
     const { passId } = req.params;
-    const { discount_percentage } = req.body;
+    const { discount_percentage, total_price } = req.body;
 
     logger.debug(
       `Update pass request received | passId: ${passId}, discount_percentage: ${discount_percentage}`
@@ -364,23 +483,77 @@ const updatePass = asyncHandler(async (req, res, next) => {
       return next(new ApiError(404, "Pass not found"));
     }
 
-    pass.discount_percentage = discount_percentage;
-    await pass.save();
+    const hasDiscount = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "discount_percentage"
+    );
+    const hasTotal = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "total_price"
+    );
 
+    if (!hasDiscount && !hasTotal) {
+      logger.warn("Update pass failed: no updatable fields provided");
+      return next(
+        new ApiError(
+          400,
+          "Provide at least one of 'discount_percentage' or 'total_price' in the request body"
+        )
+      );
+    }
+    const updates = {};
+    if (hasDiscount) {
+      if (discount_percentage === null || discount_percentage === "") {
+        return next(
+          new ApiError(
+            400,
+            "discount_percentage must be a number between 0 and 100"
+          )
+        );
+      }
+      const discNum = Number(discount_percentage);
+      if (Number.isNaN(discNum)) {
+        return next(
+          new ApiError(400, "discount_percentage must be a valid number")
+        );
+      }
+      if (discNum < 0 || discNum > 100) {
+        return next(
+          new ApiError(400, "discount_percentage must be between 0 and 100")
+        );
+      }
+      updates.discount_percentage = discNum;
+    }
+
+    if (hasTotal) {
+      if (total_price === null || total_price === "") {
+        return next(
+          new ApiError(400, "total_price must be a non-negative number")
+        );
+      }
+      const totalNum = Number(total_price);
+      if (Number.isNaN(totalNum)) {
+        return next(new ApiError(400, "total_price must be a valid number"));
+      }
+      if (totalNum < 0) {
+        return next(new ApiError(400, "total_price must be >= 0"));
+      }
+      updates.total_price = totalNum;
+    }
+
+    // Apply updates and save
+    Object.assign(pass, updates);
+    await pass.save();
     const data = pass.get({ plain: true });
 
     logger.info(
-      `Pass updated successfully | passId: ${passId}, new_discount: ${discount_percentage}`
+      `Pass updated successfully | passId: ${passId}, updates: ${JSON.stringify(updates)}`
     );
 
     return res
       .status(200)
       .json(
-        new ApiResponse(
-          200,
-          { pass: { ...data } },
-          "Discount Percentage for pass updated successfully"
-        )
+        new ApiResponse(200, { pass: { ...data } }, "Pass updated successfully")
       );
   } catch (error) {
     logger.error(`Error updating pass: ${error.message}`, {
@@ -462,3 +635,192 @@ export {
   getAllPassForSubevent,
   togglePass,
 };
+
+// // make sure at top of file:
+// // import { Op } from "sequelize";
+// // and convertToDateOnlyIST is defined and returns 'YYYY-MM-DD'
+
+// if (isGlobalBool) {
+//   if (!event_id) {
+//     logger.warn("Global pass creation failed: event_id missing");
+//     return next(new ApiError(400, "event_id is required when is_global is true"));
+//   }
+
+//   const subevents = await SubEvent.findAll({
+//     where: { event_id },
+//     order: [["date", "ASC"]],
+//   });
+
+//   if (!subevents || subevents.length === 0) {
+//     logger.warn(`Global pass creation failed: no subevents found for event ${event_id}`);
+//     return next(new ApiError(400, "No subevents found for this event"));
+//   }
+
+//   const todayStr = convertToDateOnlyIST(new Date());
+
+//   // remaining subevents are those with date >= today (today counts as remaining)
+//   const remainingSubevents = subevents.filter((se) => {
+//     const seDateStr = se.date ? convertToDateOnlyIST(se.date) : null;
+//     return seDateStr && seDateStr >= todayStr;
+//   });
+
+//   const remainingIds = remainingSubevents.map((s) => s.subevent_id);
+
+//   if (remainingIds.length === 0) {
+//     logger.warn(`Global pass creation failed: no remaining subevents for event ${event_id}`);
+//     return next(new ApiError(400, "No remaining subevents to create a global pass for"));
+//   }
+
+//   // Check if there are any active global passes that cover the remaining subevents
+//   // We'll deactivate them so the new pass can become the active pass for the remaining days.
+//   await sequelize.transaction(async (t) => {
+//     // find active global passes that include any of the remaining subevents
+//     const overlappingActivePasses = await Pass.findAll({
+//       where: {
+//         is_global: true,
+//         is_active: true,
+//       },
+//       include: [
+//         {
+//           model: PassSubEvent,
+//           as: "passSubEvents",
+//           where: {
+//             subevent_id: { [Op.in]: remainingIds },
+//           },
+//           required: true,
+//         },
+//       ],
+//       transaction: t,
+//       lock: t.LOCK.UPDATE, // lock selected rows to avoid race
+//     });
+
+//     if (overlappingActivePasses && overlappingActivePasses.length > 0) {
+//       // deactivate those old passes (business decision: automatically deactivate)
+//       const overlappingIds = overlappingActivePasses.map((p) => p.pass_id);
+//       logger.info(
+//         `Deactivating ${overlappingIds.length} existing active global pass(es) (${overlappingIds.join(
+//           ","
+//         )}) that cover remaining subevents for event ${event_id}`
+//       );
+
+//       await Pass.update(
+//         { is_active: false },
+//         {
+//           where: { pass_id: { [Op.in]: overlappingIds } },
+//           transaction: t,
+//         }
+//       );
+//     }
+
+//     // After deactivating previous active passes, recompute coverage of remaining subevents
+//     // (This ensures we don't block creation because of pre-existing active coverage.)
+//     const coveredPassSubEvents = await PassSubEvent.findAll({
+//       where: {
+//         subevent_id: { [Op.in]: remainingIds },
+//       },
+//       include: [
+//         {
+//           model: Pass,
+//           as: "pass",
+//           where: { is_global: true, is_active: true },
+//           required: true,
+//         },
+//         {
+//           model: SubEvent,
+//           as: "subevent",
+//           where: {
+//             date: { [Op.gte]: todayStr },
+//             event_id,
+//           },
+//           required: true,
+//         },
+//       ],
+//       transaction: t,
+//       lock: t.LOCK.SHARE, // shared lock while reading
+//     });
+
+//     const coveredSet = new Set(coveredPassSubEvents.map((p) => p.subevent_id));
+//     const uncoveredRemainingIds = remainingIds.filter((id) => !coveredSet.has(id));
+
+//     // enforce your business rules
+//     if (uncoveredRemainingIds.length === 0) {
+//       logger.warn(
+//         `Global pass creation failed (after deactivating): active global pass(es) already cover all remaining subevents for event ${event_id}`
+//       );
+//       throw new ApiError(
+//         400,
+//         "Cannot create global pass: an active global pass already covers all remaining subevents."
+//       ); // thrown inside transaction -> will rollback
+//     }
+
+//     if (uncoveredRemainingIds.length <= 1) {
+//       logger.warn(
+//         `Global pass creation failed: uncovered remaining subevents (${uncoveredRemainingIds.length}) <= 1`
+//       );
+//       throw new ApiError(
+//         400,
+//         "Cannot create global pass: not enough uncovered remaining subevents (<=1)"
+//       );
+//     }
+
+//     // determine validity
+//     const providedValidity =
+//       validity !== undefined && validity !== null ? Number(validity) : undefined;
+//     const passValidity =
+//       providedValidity !== undefined && !Number.isNaN(providedValidity)
+//         ? providedValidity
+//         : uncoveredRemainingIds.length ?? 1;
+
+//     if (passValidity > uncoveredRemainingIds.length) {
+//       logger.warn(
+//         `Global pass creation failed: requested validity (${passValidity}) exceeds uncovered remaining subevents (${uncoveredRemainingIds.length})`
+//       );
+//       throw new ApiError(
+//         400,
+//         `Validity cannot exceed number of uncovered remaining subevents (${uncoveredRemainingIds.length}).`
+//       );
+//     }
+
+//     // create pass and link to uncovered remaining subevents
+//     const pass = await Pass.create(
+//       {
+//         category,
+//         total_price,
+//         discount_percentage,
+//         validity: passValidity,
+//         is_active: is_active ?? false,
+//         is_global: true,
+//       },
+//       { transaction: t }
+//     );
+
+//     const passSubEventEntries = uncoveredRemainingIds.map((sid) => ({
+//       pass_id: pass.pass_id,
+//       subevent_id: sid,
+//     }));
+
+//     await PassSubEvent.bulkCreate(passSubEventEntries, {
+//       ignoreDuplicates: true,
+//       transaction: t,
+//     });
+
+//     logger.info(
+//       `Global pass created successfully | pass_id: ${pass.pass_id}, linked uncovered remaining subevents: ${uncoveredRemainingIds.length}`
+//     );
+
+//     // return data (this return value becomes the resolved value of sequelize.transaction)
+//     const data = pass.get({ plain: true });
+//     return data;
+//   }) // end transaction
+//     .then((data) => {
+//       return res
+//         .status(200)
+//         .json(new ApiResponse(200, { data }, "Global Pass Created and linked to uncovered remaining subevents"));
+//     })
+//     .catch((err) => {
+//       // If err is ApiError we pass it to next, else convert to 500
+//       if (err instanceof ApiError) return next(err);
+//       logger.error("Error creating global pass", { stack: err.stack, message: err.message });
+//       return next(new ApiError(500, "Internal Server Error", err));
+//     });
+// } // end if isGlobalBool
