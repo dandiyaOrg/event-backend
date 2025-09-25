@@ -9,6 +9,10 @@ import { Event, SubEvent } from "../db/models/index.js";
 import { validate as isUUID } from "uuid";
 import { Op } from "sequelize";
 import { logger } from "../app.js";
+import {
+  convertDateToIST,
+  getDateIST,
+} from "../services/dateconversion.service.js";
 // checked- fine - small issues fixed
 const createSubEvent = asyncHandler(async (req, res, next) => {
   try {
@@ -29,17 +33,33 @@ const createSubEvent = asyncHandler(async (req, res, next) => {
       day,
       admin_id: req.admin_id,
     });
-
+    if (!event_id || !isUUID(event_id)) {
+      return next(new ApiError(400, "Provided event_id is not a valid UUID"));
+    }
     const event = await Event.findByPk(event_id);
     if (!event) {
       logger.warn(`Event not found: ${event_id}`);
       return next(new ApiError(404, `Event with id ${event_id} not found`));
     }
 
-    const eventStartDate = new Date(event.date_start);
-    const eventEndDate = new Date(event.date_end);
-    const subEventDate = new Date(date);
+    const eventStartDate = getDateIST(event.date_start);
+    const eventEndDate = getDateIST(event.date_end);
+    const subEventDate = getDateIST(date);
 
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const diffDays = Math.round((eventEndDate - eventStartDate) / msPerDay) + 1;
+    if (day < 1 || day > diffDays) {
+      logger.warn(
+        `SubEvent day ${day} is outside allowed range 1 to ${diffDays}`,
+        { day, diffDays }
+      );
+      return next(
+        new ApiError(
+          400,
+          `SubEvent day must be between 1 and ${diffDays} (inclusive), based on event date range`
+        )
+      );
+    }
     if (subEventDate < eventStartDate || subEventDate > eventEndDate) {
       logger.warn(`SubEvent date ${date} is outside event date range`, {
         eventStartDate,
@@ -299,7 +319,12 @@ const UpdateSubevent = asyncHandler(async (req, res, next) => {
         new ApiError(404, `SubEvent with id = ${subeventId} not found`)
       );
     }
-
+    const event = await Event.findByPk(subEvent.event_id);
+    if (!event) {
+      next(
+        new ApiError(400, "Event not found with the corresponding subevent_id")
+      );
+    }
     let imageUrl;
     if (req.file) {
       const imagelocalPath = req.file.path;
@@ -337,9 +362,9 @@ const UpdateSubevent = asyncHandler(async (req, res, next) => {
       }
     }
 
-    if (day && day !== subEvent.day) {
+    if (day !== undefined && day !== subEvent.day) {
       const existingSubevent = await SubEvent.findOne({
-        where: { event_id: subEvent.event_id, day: day },
+        where: { event_id: subEvent.event_id, day },
       });
       if (existingSubevent) {
         logger.warn(`Day ${day} already exists for event ${subEvent.event_id}`);
@@ -366,6 +391,37 @@ const UpdateSubevent = asyncHandler(async (req, res, next) => {
             "Sub event with this name already exists for the event"
           )
         );
+      }
+    }
+
+    if (date && date !== subEvent.date) {
+      const newDateIST = getDateIST(date);
+      const eventStartDateIST = getDateIST(event.date_start);
+      const eventEndDateIST = getDateIST(event.date_end);
+
+      if (newDateIST < eventStartDateIST || newDateIST > eventEndDateIST) {
+        logger.warn(`SubEvent date ${date} is outside event date range`, {
+          eventStartDateIST,
+          eventEndDateIST,
+        });
+        return next(
+          new ApiError(
+            400,
+            `SubEvent date must be between event start date (${event.date_start}) and end date (${event.date_end})`
+          )
+        );
+      }
+    }
+
+    if (
+      (start_time && start_time !== subEvent.start_time) ||
+      (end_time && end_time !== subEvent.end_time)
+    ) {
+      const newStart = start_time ?? subEvent.start_time;
+      const newEnd = end_time ?? subEvent.end_time;
+      // Assuming times are strings like "HH:mm:ss"
+      if (newStart >= newEnd) {
+        return next(new ApiError(400, "End time must be after start time"));
       }
     }
 

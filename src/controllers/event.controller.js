@@ -18,7 +18,10 @@ import {
 import { generateQRCodeAndUpload } from "../services/qrGenerator.service.js";
 import { logger } from "../app.js";
 import { validate as isUUID } from "uuid";
-import { convertToDateOnlyIST } from "../services/dateconversion.service.js";
+import {
+  convertToDateOnlyIST,
+  getDateIST,
+} from "../services/dateconversion.service.js";
 
 const registerEvent = asyncHandler(async (req, res, next) => {
   try {
@@ -57,6 +60,31 @@ const registerEvent = asyncHandler(async (req, res, next) => {
     if (!req.file) {
       logger.warn("Event image not provided");
       return next(new ApiError(400, "Event image is required"));
+    }
+    const startDate = getDateIST(date_start);
+    const endDate = getDateIST(date_end);
+
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const diffDays = Math.round((endDate - startDate) / msPerDay) + 1;
+
+    if (diffDays <= 0) {
+      logger.warn("Start date must be before or equal to end date");
+      return next(
+        new ApiError(400, "Start date must be before or equal to end date")
+      );
+    }
+
+    if (diffDays !== Number(number_of_days)) {
+      logger.warn("Number of days does not match the date range", {
+        diffDays,
+        number_of_days,
+      });
+      return next(
+        new ApiError(
+          400,
+          `Number of days (${number_of_days}) does not match the difference between start and end date (${diffDays} days)`
+        )
+      );
     }
 
     const imagelocalPath = req.file.path;
