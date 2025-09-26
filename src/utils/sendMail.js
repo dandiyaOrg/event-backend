@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import * as emailTemplates from "./emailTemplate.js";
+import { logger } from "../app.js";
 
 const appEmails = {
   sendOTP: "verify@rkgarbanight.com",
@@ -61,6 +62,7 @@ const emailTypeMap = {
     subject: "Your Event Pass Details",
     template: ({
       attendee,
+      qrCid,
       qrImage,
       passCategory,
       orderNumber,
@@ -69,6 +71,7 @@ const emailTypeMap = {
     }) =>
       emailTemplates.issuedPassEmail({
         attendee,
+        qrCid,
         qrImage,
         passCategory,
         orderNumber,
@@ -102,6 +105,22 @@ const emailTypeMap = {
   },
 };
 
+const dataUrlToAttachment = (dataUrl, filename = "qr.png", cid = null) => {
+  const match = /^data:(.+);base64,(.+)$/.exec(dataUrl || "");
+  if (!match) {
+    throw new Error("Invalid data URL");
+  }
+  const mime = match[1]; // e.g. image/png
+  const base64 = match[2];
+  const content = Buffer.from(base64, "base64");
+  return {
+    filename,
+    content,
+    contentType: mime,
+    cid: cid || `${filename.replace(/\W/g, "_")}@example.com`, // unique content-id
+  };
+};
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
@@ -123,7 +142,8 @@ transporter.verify((err, success) => {
 const sendMail = async (
   to,
   type = "sendVerificationOTP",
-  templateData = {}
+  templateData = {},
+  attachments = []
 ) => {
   const emailConfig = emailTypeMap[type];
 
@@ -136,20 +156,25 @@ const sendMail = async (
       ? await emailConfig.template(templateData)
       : emailConfig.template;
 
+  const subject =
+    typeof emailConfig.subject === "function"
+      ? emailConfig.subject(templateData)
+      : emailConfig.subject;
   try {
     const info = await transporter.sendMail({
       from: emailConfig.from || process.env.SMTP_USER,
       to: Array.isArray(to) ? to.join(",") : to,
-      subject: emailConfig.subject,
+      subject,
       html,
+      attachments,
     });
 
-    console.log("Message sent: %s", info.messageId);
+    logger.info("Message sent: %s", info.messageId);
     return { emailData: info, error: null };
   } catch (error) {
-    console.error("Error sending email:", error);
+    logger.error("Error sending email:", error);
     return { emailData: null, error };
   }
 };
 
-export default sendMail;
+export { sendMail, dataUrlToAttachment };

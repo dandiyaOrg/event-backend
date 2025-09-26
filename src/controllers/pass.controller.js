@@ -448,11 +448,15 @@ const togglePass = asyncHandler(async (req, res, next) => {
       }`
     );
 
-    return res.status(200).json({
-      status: "success",
-      message: `Pass has been ${pass.is_active ? "activated" : "deactivated"}.`,
-      data: pass,
-    });
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { pass },
+          `Pass has been ${pass.is_active ? "activated" : "deactivated"}.`
+        )
+      );
   } catch (error) {
     logger.error(`Error toggling pass: ${error.message}`, {
       stack: error.stack,

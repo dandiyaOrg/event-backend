@@ -290,6 +290,7 @@ const eventRegistrationEmail = ({
 const issuedPassEmail = ({
   attendee = {},
   qrImage = "",
+  qrCid,
   passCategory = "",
   orderNumber = "",
   subeventName = "",
@@ -298,7 +299,7 @@ const issuedPassEmail = ({
 }) => {
   const expiryText = expiryDate
     ? `<p style="font-size:14px; color:#dc3545; font-weight:bold;">
-         Note: Your pass expires on ${new Date(expiryDate).toLocaleDateString()}.
+         Note: Your pass expires on ${expiryDate}.
        </p>`
     : "";
 
@@ -318,11 +319,11 @@ const issuedPassEmail = ({
       </p>
       <ul style="font-size:15px; color:#212529; padding-left:20px; margin-bottom:20px;">
         <li><b>Pass Category:</b> ${passCategory}</li>
-        <li><b>Event / Subevent:</b> ${subeventName}</li>
+        <li><b>Subevent:</b> ${subeventName}</li>
         ${expiryText}
       </ul>
       <div style="text-align:center;margin:30px 0;">
-        <img src="${qrImage}" alt="QR Code" style="width:200px; height:200px; border:1px solid #ddd; border-radius:8px;" />
+        <img src="cid:${qrCid}" alt="QR Code" style="width:200px; height:200px; border:1px solid #ddd; border-radius:8px;" />
       </div>
       <p style="font-size:13px;color:#747a80;line-height:1.6;margin:20px 0 0 0;">
         Please present this QR code at the event check-in.
@@ -330,7 +331,7 @@ const issuedPassEmail = ({
       <hr style="margin:16px 0;border-top:1px solid #ececec;" />
       <div style="font-size:13px;color:#444;margin-top:13px; text-align:center;">
         Thank you for being with us!<br/>
-        &copy; ${new Date().getFullYear()} Your Organization Name
+        &copy; ${new Date().getFullYear()}
       </div>
     </div>
   </div>
@@ -340,7 +341,7 @@ const issuedPassEmail = ({
 const issuedBulkPassEmail = ({
   orderId = "",
   billingUserName = "",
-  passes = [], // array of { attendee_name, qrImage, passCategory, subeventName, expiryDate }
+  passes = [], // array of { attendee_name, qrCid, qrImage, passCategory, subeventName, expiryDate }
   title = "Your Event Passes",
 }) => {
   const year = new Date().getFullYear();
@@ -351,13 +352,16 @@ const issuedBulkPassEmail = ({
           .map((p) => {
             const expiryText = p.expiryDate
               ? `<div style="font-size:13px;color:#dc3545;font-weight:600;margin-top:6px;">
-                 Expires: ${new Date(p.expiryDate).toLocaleDateString()}
-               </div>`
+                   Expires: ${p.expiryDate}
+                 </div>`
               : "";
 
-            const qrHtml = p.qrImage
-              ? `<img src="${p.qrImage}" alt="QR for ${p.attendee_name || "Attendee"}" style="width:100px;height:100px;object-fit:cover;border:1px solid #ddd;border-radius:6px;" />`
-              : `<div style="width:100px;height:100px;display:inline-block;border:1px dashed #ccc;border-radius:6px;line-height:100px;text-align:center;color:#999;font-size:12px;">No QR</div>`;
+            // Prefer CID (attachment) if present, else fallback to qrImage URL (may be blocked in some clients)
+            const qrHtml = p.qrCid
+              ? `<img src="cid:${p.qrCid}" alt="QR for ${p.attendee_name || "Attendee"}" style="width:100px;height:100px;object-fit:cover;border:1px solid #ddd;border-radius:6px;" />`
+              : p.qrImage
+                ? `<img src="${p.qrImage}" alt="QR for ${p.attendee_name || "Attendee"}" style="width:100px;height:100px;object-fit:cover;border:1px solid #ddd;border-radius:6px;" />`
+                : `<div style="width:100px;height:100px;display:inline-block;border:1px dashed #ccc;border-radius:6px;line-height:100px;text-align:center;color:#999;font-size:12px;">No QR</div>`;
 
             return `
             <tr style="border-bottom:1px solid #eee;">

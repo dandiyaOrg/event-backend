@@ -12,7 +12,7 @@ import {
   Pass,
 } from "../db/models/index.js";
 import { decryptPassword } from "../utils/encrypt.js";
-import sendMail from "../utils/sendMail.js";
+import { sendMail } from "../utils/sendMail.js";
 import { logger } from "../app.js";
 const createEmployee = asyncHandler(async (req, res, next) => {
   try {

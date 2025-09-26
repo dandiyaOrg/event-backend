@@ -1,7 +1,7 @@
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import sendMail from "../utils/sendMail.js";
+import { sendMail } from "../utils/sendMail.js";
 import { Op } from "sequelize";
 import {
   Pass,
@@ -490,7 +490,7 @@ const getAllSubeventsWithPasses = asyncHandler(async (req, res, next) => {
         {
           model: Pass,
           as: "passes",
-          where: { is_active: true },
+          where: { is_active: true, is_global: false },
           required: false,
           attributes: [
             "pass_id",

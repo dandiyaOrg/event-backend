@@ -17,7 +17,7 @@ import {
 } from "../db/models/index.js";
 import { Op } from "sequelize";
 import jwt from "jsonwebtoken";
-import sendMail from "../utils/sendMail.js";
+import { sendMail } from "../utils/sendMail.js";
 import { logger } from "../app.js";
 import { validate as isUUID } from "uuid";
 

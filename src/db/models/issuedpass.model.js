@@ -80,11 +80,6 @@ const IssuedPass = sequelize.define(
         },
       },
     },
-    booking_number: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      unique: true,
-    },
     status: {
       type: DataTypes.ENUM(
         "active",
@@ -163,10 +158,6 @@ const IssuedPass = sequelize.define(
         fields: ["subevent_id"],
       },
       {
-        fields: ["booking_number"],
-        unique: true,
-      },
-      {
         fields: ["status"],
       },
       {
@@ -186,21 +177,9 @@ const IssuedPass = sequelize.define(
         } else if (!issuedPass.order_item_id) {
           throw new Error("Non-sponsored pass requires order_item_id");
         }
-
-        if (!issuedPass.booking_number) {
-          const lastPass = await IssuedPass.findOne({
-            order: [["booking_number", "DESC"]],
-            attributes: ["booking_number"],
-          });
-
-          const nextBookingNumber = lastPass
-            ? lastPass.booking_number + 1
-            : 1000;
-          issuedPass.booking_number = nextBookingNumber;
-        }
       },
+
       beforeUpdate: (issuedPass) => {
-        // Auto-expire if expiry date is passed
         if (
           issuedPass.expiry_date &&
           new Date() > new Date(issuedPass.expiry_date)

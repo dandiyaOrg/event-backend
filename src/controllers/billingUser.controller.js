@@ -19,9 +19,12 @@ import {
 } from "../db/models/index.js";
 import { Op } from "sequelize";
 import { logger } from "../app.js";
-import sendMail from "../utils/sendMail.js";
+import { sendMail, dataUrlToAttachment } from "../utils/sendMail.js";
 import { generateQR } from "../services/qrGenerator.service.js";
-import { getDateIST } from "../services/dateconversion.service.js";
+import {
+  formatExpiryForEmail,
+  getDateIST,
+} from "../services/dateconversion.service.js";
 
 const createBillingUser = asyncHandler(async (req, res, next) => {
   try {
@@ -284,6 +287,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
               name: attendeeData.name,
               email: normalizedEmail,
               whatsapp: normalizedWhatsapp,
+              gender: attendeeData.gender,
             },
             { transaction: t }
           );
@@ -526,6 +530,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
           {
             name: attendeeData.name,
             email: normalizedEmail,
+            gender: attendeeData.gender,
             whatsapp: normalizedWhatsapp,
           },
           { transaction: t }
@@ -587,6 +592,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
 
 // check the issue-- multiple time pass issued  and booking number
 const issuePassToAttendees = asyncHandler(async (req, res, next) => {
+  let order;
   try {
     const { order_id } = req.body;
 
@@ -598,7 +604,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     }
 
     // 1. Fetch order with associated transaction
-    const order = await Order.findByPk(order_id, {
+    order = await Order.findByPk(order_id, {
       include: [{ model: Transaction, as: "transaction" }],
     });
 
@@ -606,7 +612,17 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
       logger.warn(`Order not found for id: ${order_id}`);
       return next(new ApiError(404, `Order not found for id: ${order_id}`));
     }
-
+    if (order.status !== "pending") {
+      logger.warn(
+        `Order has already been processed or is not pending. Current status: ${order.status}`
+      );
+      return next(
+        new ApiError(
+          400,
+          `Order is already processed or not in a pending state.`
+        )
+      );
+    }
     const transaction = order.transaction;
     if (!transaction) {
       logger.warn(`Transaction not found for order: ${order_id}`);
@@ -644,6 +660,11 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
       );
     }
     const billingUser = await BillingUser.findByPk(order.billing_user_id);
+    if (!billingUser) {
+      return next(
+        new ApiError(400, "Billing User not found for this order_id")
+      );
+    }
     // 4. Fetch order items with pass
     const orderItems = await OrderItem.findAll({
       where: { order_id },
@@ -758,7 +779,6 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               is_expired: false,
               issued_date: new Date(),
               expiry_date: expiryDate,
-              booking_number: null,
               status: "active",
               used_count: 0,
               qr_data: null,
@@ -792,7 +812,6 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               qr_data: qrData.data,
               qr_image: qrData.image,
             });
-
             // accumulate issued-pass info for billing email if needed
             issuedPassesForBilling.push({
               issued_pass_id: issuedPass.issued_pass_id,
@@ -804,21 +823,76 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
               qrImage: qrData.image,
               passCategory: item.pass?.category ?? null,
               subeventName: mainSubEvent.name,
-              expiryDate: issuedPass.expiry_date,
+              expiryDate: formatExpiryForEmail(issuedPass.expiry_date),
             });
 
+            const cid = `qr-${issuedPass.issued_pass_id}@example.com`;
+            let attachments = [];
+            try {
+              const att = dataUrlToAttachment(
+                qrData.image,
+                `qr-${issuedPass.issued_pass_id}.png`,
+                cid
+              );
+              attachments.push(att);
+            } catch (e) {
+              logger.warn(
+                "Failed to convert QR data URL to attachment, will still try inline image url",
+                e
+              );
+            }
             // send single emails to attendees only when sendAllToBilling is falsy
-            if (!order.sendAllToBilling) {
+            if (Boolean(order.sendAllToBilling) === false) {
               // send mail to attendee
-              await sendMail(attendee.email, "issuedPass", {
-                attendee,
-                qrImage: qrData.image,
-                passCategory: item.pass.category,
-                orderNumber: order_id,
-                subeventName: mainSubEvent.name,
-                expiryDate: issuedPass.expiry_date,
-              });
+              const { emailData, error } = await sendMail(
+                attendee.email,
+                "issuedPass",
+                {
+                  attendee,
+                  qrImage: qrData.image,
+                  qrCid: cid,
+                  passCategory: item.pass.category,
+                  orderNumber: order_id,
+                  subeventName: mainSubEvent.name,
+                  expiryDate: formatExpiryForEmail(issuedPass.expiry_date),
+                },
+                attachments
+              );
+              if (error !== null) {
+                logger.error(
+                  `Error sending email for issued pass ${issuedPass.issued_pass_id} to attendee ${attendee.attendee_id}`,
+                  error
+                );
+                return next(
+                  new ApiError(
+                    500,
+                    "Failed to send email contact admin for the passes",
+                    error
+                  )
+                );
+              }
 
+              const isSuccess =
+                emailData &&
+                Array.isArray(emailData.accepted) &&
+                emailData.accepted.length > 0 &&
+                emailData.rejected.length === 0 &&
+                emailData.response &&
+                emailData.response.startsWith("250");
+
+              if (!isSuccess) {
+                logger.error(
+                  `Email sending failed for issued pass ${issuedPass.issued_pass_id} to attendee ${attendee.attendee_id}`,
+                  emailData
+                );
+                return next(
+                  new ApiError(
+                    500,
+                    "Failed to send email contact admin for the passes",
+                    emailData
+                  )
+                );
+              }
               logger.info(
                 `Email sent for issued pass ${issuedPass.issued_pass_id} to attendee ${attendee.attendee_id}`
               );
@@ -829,32 +903,38 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     ); // end orderItems.map
 
     // If sendAllToBilling is truthy, send ONE email to billing user with all passes
-    if (order.sendAllToBilling) {
+    if (Boolean(order.sendAllToBilling) === true) {
       // figure out billing email - try a few fallbacks
-      let billingEmail = null;
-      try {
-        if (order.billing_user_email) {
-          billingEmail = order.billing_user_email;
-        } else if (
-          order.getBillingUser &&
-          typeof order.getBillingUser === "function"
-        ) {
-          const bu = await order.getBillingUser();
-          billingEmail = bu?.email;
-        } else if (typeof BillingUser !== "undefined") {
-          const bu = await BillingUser.findByPk(order.billing_user_id);
-          billingEmail = bu?.email;
-        } else if (typeof User !== "undefined") {
-          const bu = await User.findByPk(order.billing_user_id);
-          billingEmail = bu?.email;
-        } else {
-          // last resort: if order has billing_user_id but no model, try to read a denormalized field
-          billingEmail = order.billing_user_email || null;
+      const attachments = [];
+      const passesForTemplate = issuedPassesForBilling.map((p) => {
+        const cid = `qr-${p.issued_pass_id}@${order_id}`;
+        if (p.qrImage) {
+          try {
+            const att = dataUrlToAttachment(
+              p.qrImage,
+              `qr-${p.issued_pass_id}.png`,
+              cid
+            );
+            attachments.push(att);
+          } catch (e) {
+            logger.warn(
+              `Failed to convert qrImage to attachment for issued_pass ${p.issued_pass_id}`,
+              e
+            );
+            // still continue — template will render placeholder if needed
+          }
         }
-      } catch (err) {
-        logger.warn("Failed to resolve billing user email", err);
-      }
-
+        return {
+          attendee_name: p.attendee_name,
+          attendee_email: p.attendee_email,
+          passCategory: p.passCategory,
+          subeventName: p.subeventName,
+          expiryDate: p.expiryDate,
+          issued_pass_id: p.issued_pass_id,
+          qrCid: cid, // used in template as <img src="cid:..."/>
+        };
+      });
+      let billingEmail = billingUser.email;
       if (!billingEmail) {
         logger.error(
           `Billing email not found for order ${order_id} but sendAllToBilling is true`
@@ -867,12 +947,47 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
         );
       }
 
-      // send one consolidated mail - you said you'll handle template, so we pass `passes` array
-      await sendMail(billingEmail, "issuedPassBulk", {
-        orderId: order_id,
-        billinUsername: order.billing_user_id,
-        passes: issuedPassesForBilling,
-      });
+      const billingUserName = billingUser.name || "Valued Customer";
+      // send consolidated email to billing email
+      const { emailData, error } = await sendMail(
+        billingEmail,
+        "issuedPassBulk",
+        {
+          orderId: order_id,
+          billingUserName,
+          passes: passesForTemplate,
+        },
+        attachments
+      );
+      if (error !== null) {
+        logger.error(
+          `Failed to send consolidated email to billing ${billingEmail}`,
+          error
+        );
+        return next(
+          new ApiError(500, "Failed to send consolidated passes email", error)
+        );
+      }
+      const isSuccess =
+        emailData &&
+        Array.isArray(emailData.accepted) &&
+        emailData.accepted.length > 0 &&
+        Array.isArray(emailData.rejected) &&
+        emailData.rejected.length === 0;
+
+      if (!isSuccess) {
+        logger.error(
+          `Consolidated email reported issues for order ${order_id}`,
+          emailData
+        );
+        return next(
+          new ApiError(
+            500,
+            "Failed to deliver consolidated passes email",
+            emailData
+          )
+        );
+      }
 
       logger.info(
         `Consolidated email with ${issuedPassesForBilling.length} passes sent to billing email ${billingEmail}`
@@ -880,7 +995,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     }
 
     logger.info(`All passes issued successfully for order ${order_id}`);
-
+    await order.update({ status: "confirmed" });
     return res
       .status(200)
       .json(
@@ -888,6 +1003,13 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
       );
   } catch (error) {
     logger.error("Error in issuePassToAttendees", error);
+    if (order && order.status === "pending") {
+      try {
+        await order.update({ status: "failed" });
+      } catch (updateError) {
+        logger.error("Failed to update order to failed status", updateError);
+      }
+    }
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
@@ -983,7 +1105,12 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
         new ApiError(400, "Subevent linked to global pass not found")
       );
     }
-
+    const billingUser = await BillingUser.findByPk(order.billing_user_id);
+    if (!billingUser) {
+      return next(
+        new ApiError(400, "Billing User not found for this order_id")
+      );
+    }
     // 4. Fetch attendees linked to the order item
     const orderItemAttendees = await OrderItemAttendee.findAll({
       where: { order_item_id: item.order_item_id },
@@ -1046,7 +1173,6 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               is_expired: false,
               issued_date: new Date(),
               expiry_date: expiryDate,
-              booking_number: null,
               status: "active",
               used_count: 0,
               qr_data: null,
