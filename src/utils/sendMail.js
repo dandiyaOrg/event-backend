@@ -77,6 +77,17 @@ const emailTypeMap = {
         title: "Your Event Pass",
       }),
   },
+  issuedPassBulk: {
+    from: appEmails.sendTicket,
+    subject: ({ orderId = "" }) => `Passes for Order ${orderId}`,
+    template: ({ orderId, billingUserName, passes }) =>
+      emailTemplates.issuedBulkPassEmail({
+        orderId,
+        billingUserName,
+        passes,
+        title: "Your Event Passes",
+      }),
+  },
   issuedPassMultiDay: {
     from: appEmails.sendTicket,
     subject: "Your Multi-Day Event Passes",
@@ -100,8 +111,8 @@ const transporter = nodemailer.createTransport({
     pass: process.env.SMTP_PASS,
   },
   tls: {
-    rejectUnauthorized: process.env.NODE_ENV === "production"
-  }
+    rejectUnauthorized: process.env.NODE_ENV === "production",
+  },
 });
 
 transporter.verify((err, success) => {

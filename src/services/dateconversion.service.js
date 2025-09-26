@@ -18,7 +18,6 @@ const convertToDateOnlyIST = (date) => {
 };
 const getDateIST = (date) => {
   const d = typeof date === "string" ? parseISO(date) : date;
-  console.log(parseISO(date));
   return toZonedTime(d, indiaTZ);
 };
 export { convertDateToIST, formatDateTime, convertToDateOnlyIST, getDateIST };

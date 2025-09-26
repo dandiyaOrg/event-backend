@@ -34,6 +34,11 @@ const Order = sequelize.define(
       type: DataTypes.UUID,
       allowNull: false,
     },
+    sendAllToBilling: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      defaultValue: false,
+    },
     status: {
       type: DataTypes.ENUM("pending", "confirmed", "cancelled", "expired"),
       allowNull: false,
@@ -84,4 +89,4 @@ const Order = sequelize.define(
   }
 );
 
-export default Order;
+export default Order;

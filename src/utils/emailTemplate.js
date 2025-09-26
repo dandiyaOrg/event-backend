@@ -337,6 +337,77 @@ const issuedPassEmail = ({
   `;
 };
 
+const issuedBulkPassEmail = ({
+  orderId = "",
+  billingUserName = "",
+  passes = [], // array of { attendee_name, qrImage, passCategory, subeventName, expiryDate }
+  title = "Your Event Passes",
+}) => {
+  const year = new Date().getFullYear();
+
+  const rows =
+    passes && passes.length
+      ? passes
+          .map((p) => {
+            const expiryText = p.expiryDate
+              ? `<div style="font-size:13px;color:#dc3545;font-weight:600;margin-top:6px;">
+                 Expires: ${new Date(p.expiryDate).toLocaleDateString()}
+               </div>`
+              : "";
+
+            const qrHtml = p.qrImage
+              ? `<img src="${p.qrImage}" alt="QR for ${p.attendee_name || "Attendee"}" style="width:100px;height:100px;object-fit:cover;border:1px solid #ddd;border-radius:6px;" />`
+              : `<div style="width:100px;height:100px;display:inline-block;border:1px dashed #ccc;border-radius:6px;line-height:100px;text-align:center;color:#999;font-size:12px;">No QR</div>`;
+
+            return `
+            <tr style="border-bottom:1px solid #eee;">
+              <td style="padding:14px 12px; vertical-align:top;">
+                <div style="font-size:15px;color:#212529;font-weight:700;margin-bottom:6px;">${p.attendee_name || "Attendee"}</div>
+                <div style="font-size:14px;color:#43484d;margin-bottom:4px;"><strong>Pass:</strong> ${p.passCategory || "-"}</div>
+                <div style="font-size:14px;color:#43484d;margin-bottom:4px;"><strong>Event / Subevent:</strong> ${p.subeventName || "-"}</div>
+                ${expiryText}
+              </td>
+              <td style="width:120px;padding:12px;text-align:center;vertical-align:middle;">
+                ${qrHtml}
+              </td>
+            </tr>
+          `;
+          })
+          .join("")
+      : `<tr><td style="padding:16px;text-align:center;color:#666;">No passes found for this order.</td></tr>`;
+
+  return `
+  <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:36px;">
+    <div style="max-width:700px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:28px;">
+      <div style="text-align:center; margin-bottom:18px;">
+        <img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" alt="Event Passes" style="width:56px;height:56px;margin-bottom:10px;" />
+        <h2 style="font-size:20px;font-weight:700;margin:6px 0;color:#212529;">${title}</h2>
+        <p style="color:#6c757d;font-size:13px;margin:0;">Order #: ${orderId}</p>
+        ${billingUserName ? `<p style="color:#6c757d;font-size:13px;margin:4px 0 0 0;">To: ${billingUserName}</p>` : ""}
+      </div>
+
+      <p style="font-size:15px;color:#43484d;line-height:1.5;margin:8px 0 18px 0;">
+        Hello ${billingUserName || "Billing User"},<br/>
+        Please find all the passes associated with your order listed below. You can share these with the attendees as needed.
+      </p>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+
+      <hr style="margin:18px 0;border-top:1px solid #ececec;" />
+
+      <div style="font-size:13px;color:#747a80;line-height:1.6;text-align:center;">
+        If you need help, reply to this email.<br/>
+        &copy; ${year} Your Organization Name
+      </div>
+    </div>
+  </div>
+  `;
+};
+
 const issuedPassMultiDayEmail = ({
   attendee = {},
   passes = [], // Array of { subeventName, expiryDate, qrImage, day }
@@ -404,5 +475,6 @@ export {
   employeeCredentialsUpdateEmail,
   eventRegistrationEmail,
   issuedPassEmail,
+  issuedBulkPassEmail,
   issuedPassMultiDayEmail,
 };

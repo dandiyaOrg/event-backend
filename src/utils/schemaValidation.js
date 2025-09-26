@@ -371,8 +371,19 @@ const createBillingUserSchema = Joi.object({
 const attendeeSchema = Joi.object({
   name: commonFields.name.label("Attendee Name"),
   whatsapp: commonFields.mobileNumber.label("WhatsApp Number"),
-  email: commonFields.email.label("Email"),
-  dob: commonFields.dateSchema.label("Date of Birth"),
+  email: commonFields.email
+    .label("Email")
+    .allow(null, "") // allow null/empty when it's optional
+    .when(Joi.ref("/sendAllToBilling"), {
+      is: false, // when sendAllToBilling === false
+      then: Joi.required().messages({
+        "any.required":
+          "Email is required for each attendee when Send All To Billing is false",
+        "string.email": "Each attendee must have a valid email",
+      }),
+      otherwise: Joi.optional(),
+    }),
+  dob: commonFields.dateSchema.label("Date of Birth").optional(),
   gender: commonFields.gender.label("Gender"),
   pass_id: commonFields.idSchema.label("Pass ID"),
 });
@@ -380,8 +391,19 @@ const attendeeSchema = Joi.object({
 const attendeeGlobalPassSchema = Joi.object({
   name: commonFields.name.label("Attendee Name"),
   whatsapp: commonFields.mobileNumber.label("WhatsApp Number"),
-  email: commonFields.email.label("Email"),
-  dob: commonFields.dateSchema.label("Date of Birth"),
+  email: commonFields.email
+    .label("Email")
+    .allow(null, "")
+    .when(Joi.ref("/sendAllToBilling"), {
+      is: false,
+      then: Joi.required().messages({
+        "any.required":
+          "Email is required for each attendee when Send All To Billing is false",
+        "string.email": "Each attendee must have a valid email",
+      }),
+      otherwise: Joi.optional(),
+    }),
+  dob: commonFields.dateSchema.label("Date of Birth").optional(),
   gender: commonFields.gender.label("Gender"),
 });
 
@@ -401,12 +423,18 @@ const createOrderSchema = Joi.object({
       "array.max": "Maximum {#limit} attendees allowed",
       "any.required": "{#label} are required",
     }),
+  sendAllToBilling: commonFields.is_active
+    .label("Send All Emails To Billing User")
+    .optional(),
 });
 const createGlobalPassOrderSchema = Joi.object({
   event_id: commonFields.idSchema.label("Event ID"),
   billing_user_id: commonFields.idSchema.label("Billing User ID"),
   total_amount: commonFields.amount.label("Total Amount"),
   pass_id: commonFields.idSchema.label("Pass Id"),
+  sendAllToBilling: commonFields.is_active.label(
+    "Send All Emails To Billing User"
+  ),
   attendees: Joi.array()
     .items(attendeeGlobalPassSchema)
     .min(1)
