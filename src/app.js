@@ -78,7 +78,7 @@ const corsOptions = {
     "X-Client-Token",
   ],
   exposedHeaders: ["accessToken", "refreshToken", "X-Client-Token"], // instruct browsers which headers to expose to JS
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   optionsSuccessStatus: 204,
   maxAge: 86400, // 24 hours for preflight cache
 };
@@ -133,8 +133,8 @@ import paymentRoutes from "./routes/payment.routes.js";
 
 // Health routes (NEW)
 import healthRoutes from "./routes/health.routes.js";
-app.use("/_health", healthRoutes); // endpoints: /_health/health, /_health/ready, /_health/live
 app.use("/api/v1/payment", paymentRoutes);
+app.use("/_health", healthRoutes); // endpoints: /_health/health, /_health/ready, /_health/live
 
 app.use(checkClientToken);
 app.use("/api/v1/admin", adminRoutes);
