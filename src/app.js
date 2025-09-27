@@ -120,7 +120,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 import adminRoutes from "./routes/admin.routes.js";
@@ -129,6 +129,8 @@ import employeeRoutes from "./routes/emp.routes.js";
 import subeventRoutes from "./routes/subevent.routes.js";
 import passRoutes from "./routes/pass.routes.js";
 import billingUserRoutes from "./routes/billingUser.routes.js";
+import paymentRoutes from "./routes/payment.routes.js";
+
 // Health routes (NEW)
 import healthRoutes from "./routes/health.routes.js";
 app.use("/_health", healthRoutes); // endpoints: /_health/health, /_health/ready, /_health/live
@@ -140,6 +142,7 @@ app.use("/api/v1/employee", employeeRoutes);
 app.use("/api/v1/subevent", subeventRoutes);
 app.use("/api/v1/pass", passRoutes);
 app.use("/api/v1/billingUser", billingUserRoutes);
+app.use("/api/v1/payment", paymentRoutes);
 app.get("/", async (req, res, next) => {
   res.send("hello from server");
 });
