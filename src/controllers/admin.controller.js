@@ -490,8 +490,8 @@ const getTransactionsForAdmin = asyncHandler(async (req, res, next) => {
       source_of_payment: tx.source_of_payment,
       status: tx.status,
       method_of_payment: tx.method_of_payment,
-      razorpay_order_id: tx.razorpay_order_id,
-      razorpay_payment_id: tx.razorpay_payment_id,
+      merchant_order_id: tx.merchant_order_id,
+      merchant_payment_id: tx.merchant_payment_id,
       order_id: tx.order_id,
       refund_amount: tx.refund_amount,
       refund_reason: tx.refund_reason,
@@ -594,7 +594,7 @@ const getAllOrdersForAdmin = asyncHandler(async (req, res, next) => {
       const plain = typeof o.get === "function" ? o.get({ plain: true }) : o;
       return {
         order_id: plain.order_id,
-        razorpay_order_id: plain.razorpay_order_id,
+        merchant_order_id: plain.merchant_order_id,
         billing_user_id: plain.billing_user_id,
         admin_id: plain.admin_id,
         status: plain.status,
@@ -759,7 +759,7 @@ const getOrderDetails = asyncHandler(async (req, res, next) => {
     // Build response exactly in the shape you requested
     const responsePayload = {
       order_id: o.order_id,
-      razorpay_order_id: o.razorpay_order_id,
+      merchant_order_id: o.merchant_order_id,
       billing_user_id: o.billing_user_id,
       status: o.status,
       total_amount: o.total_amount,

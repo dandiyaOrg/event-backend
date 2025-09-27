@@ -11,7 +11,7 @@ const Order = sequelize.define(
       allowNull: false,
       field: "order_id",
     },
-    razorpay_order_id: {
+    merchant_order_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
       unique: true,
@@ -80,7 +80,7 @@ const Order = sequelize.define(
         fields: ["status"],
       },
       {
-        fields: ["razorpay_order_id"],
+        fields: ["merchant_order_id"],
       },
       {
         fields: ["created_at"],

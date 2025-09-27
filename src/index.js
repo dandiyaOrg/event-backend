@@ -5,6 +5,7 @@ import { connectDB } from "./db/index.js";
 import { app, logger } from "./app.js";
 import { sequelize } from "./db/index.js";
 import syncModels from "./db/models/index.js";
+import { initPhonePe } from "./services/payment.service.js";
 
 const startServer = async () => {
   try {
@@ -18,6 +19,25 @@ const startServer = async () => {
     logger.info("✅ Database connection verified");
     logger.info("ℹ️ Syncing database models");
     await syncModels();
+
+    // <<< NEW: Initialize PhonePe SDK here >>>
+    logger.info("🔐 Initializing PhonePe SDK...");
+    try {
+      await initPhonePe({
+        clientId: process.env.PHONEPE_CLIENT_ID,
+        clientSecret: process.env.PHONEPE_CLIENT_SECRET,
+        clientVersion: process.env.PHONEPE_CLIENT_VERSION || "1",
+        env: process.env.PHONEPE_ENV || "SANDBOX",
+        callbackUser: process.env.PHONEPE_CALLBACK_USER || "",
+        callbackPass: process.env.PHONEPE_CALLBACK_PASS || "",
+      });
+      logger.info("✅ PhonePe SDK initialized");
+    } catch (err) {
+      logger.error("❌ PhonePe SDK initialization failed:", err);
+      // fatal: don't start server if payment SDK isn't configured correctly
+      process.exit(1);
+    }
+    // <<< end PhonePe init >>>
 
     // Step 3: Start the server immediately
     const myport = process.env.PORT || 8000;

@@ -26,6 +26,7 @@ import {
   formatExpiryForEmail,
   getDateIST,
 } from "../services/dateconversion.service.js";
+import { createPayment } from "../services/payment.service.js";
 
 const createBillingUser = asyncHandler(async (req, res, next) => {
   try {
@@ -456,13 +457,13 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
 
           if (linkedRemainingCount === remainingIds.length) {
             logger.warn(
-              `Attendee ${normalizedEmail} already has a global pass for remaining subevents of event ${event_id}`
+              `Attendee ${normalizedWhatsapp} already has a global pass for remaining subevents of event ${event_id}`
             );
             await t.rollback();
             return next(
               new ApiError(
                 400,
-                `Attendee with email ${normalizedEmail} already assigned a global pass for the remaining subevents of this event`
+                `Attendee with email ${normalizedWhatsapp} already assigned a global pass for the remaining subevents of this event`
               )
             );
           }
@@ -507,15 +508,54 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       logger.info(
         `Global pass order completed successfully for order_id: ${order.order_id}`
       );
-      return res
-        .status(201)
-        .json(
-          new ApiResponse(
-            201,
-            { order },
-            "Global pass order created successfully"
-          )
-        );
+      const amountInPaise = Math.round(Number(order.total_amount) * 100); // if order_amount is rupees
+      logger.debug(
+        `creating transaction for order ${order_id}, amount: ${amountInPaise} paise`
+      );
+      const transaction = await Transaction.create({
+        order_id: order.order_id,
+        admin_id: order.admin_id,
+        amount: Number(order.total_amount).toFixed(2),
+        merchant_order_id: null,
+        status: "pending",
+      });
+
+      const phonePeResp = await createPayment({
+        amountInPaise,
+        redirectUrl:
+          process.env.DEFAULT_REDIRECT_URL ||
+          "https://rkgarbanight.com/payment/result",
+        merchantOrderId: order.order_id,
+        meta: {
+          udf1: billingUser.email || "",
+          udf2: billingUser.mobile_no || "",
+        },
+      });
+
+      await transaction.update(
+        {
+          merchant_order_id: phonePeResp.merchantOrderId || order.order_id,
+          merchant_payment_id: phonePeResp.rawResponse.orderId || null,
+          redirect_url: phonePeResp.redirectUrl || null,
+          gateway_response: phonePeResp.rawResponse || phonePeResp,
+        },
+        { transaction: t }
+      );
+      await order.update(
+        { merchant_order_id: phonePeResp.merchantOrderId || order.order_id },
+        { transaction: t }
+      );
+      return res.status(201).json(
+        new ApiResponse(
+          201,
+          {
+            order,
+            redirectUrl: phonePeResp.redirectUrl,
+            merchantOrderId: phonePeResp.merchantOrderId || order.order_id,
+          },
+          "Order created successfully"
+        )
+      );
     } catch (error) {
       await t.rollback();
       logger.error("Failed to create global pass order", {
@@ -569,7 +609,10 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         )
       );
     }
-
+    const billingUser = await BillingUser.findByPk(billing_user_id);
+    if (!billingUser) {
+      return next(new ApiError(400, "BillingUser not found"));
+    }
     // -------------------------
     // Build pass -> attendee list map
     // -------------------------
@@ -832,10 +875,54 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
 
     await t.commit();
     logger.info(`Order completed successfully for order_id: ${order.order_id}`);
+    const amountInPaise = Math.round(Number(order.total_amount) * 100); // if order_amount is rupees
+    logger.debug(
+      `creating transaction for order ${order_id}, amount: ${amountInPaise} paise`
+    );
+    const transaction = await Transaction.create({
+      order_id: order.order_id,
+      admin_id: order.admin_id,
+      amount: Number(order.total_amount).toFixed(2),
+      merchant_order_id: null,
+      status: "pending",
+    });
 
-    return res
-      .status(201)
-      .json(new ApiResponse(201, { order }, "Order created successfully"));
+    const phonePeResp = await createPayment({
+      amountInPaise,
+      redirectUrl:
+        process.env.DEFAULT_REDIRECT_URL ||
+        "https://rkgarbanight.com/payment/result",
+      merchantOrderId: order.order_id,
+      meta: {
+        udf1: billingUser.email || "",
+        udf2: billingUser.mobile_no || "",
+      },
+    });
+
+    await transaction.update(
+      {
+        merchant_order_id: phonePeResp.merchantOrderId || order.order_id,
+        merchant_payment_id: phonePeResp.rawResponse.orderId || null,
+        redirect_url: phonePeResp.redirectUrl || null,
+        gateway_response: phonePeResp.rawResponse || phonePeResp,
+      },
+      { transaction: t }
+    );
+    await order.update(
+      { merchant_order_id: phonePeResp.merchantOrderId || order.order_id },
+      { transaction: t }
+    );
+    return res.status(201).json(
+      new ApiResponse(
+        201,
+        {
+          order,
+          redirectUrl: phonePeResp.redirectUrl,
+          merchantOrderId: phonePeResp.merchantOrderId || order.order_id,
+        },
+        "Order created successfully"
+      )
+    );
   } catch (error) {
     await t.rollback();
     logger.error("Failed to create order", { stack: error.stack });

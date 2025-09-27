@@ -68,23 +68,26 @@ const Transaction = sequelize.define(
         isIn: [["card", "netbanking", "upi", "wallet", "emi", "cash", "other"]],
       },
     },
-    razorpay_order_id: {
+    merchant_order_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
       validate: {
         len: [0, 100],
       },
     },
-    razorpay_payment_id: {
+    redirect_url: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      validate: {
+        len: [0, 200],
+      },
+    },
+    merchant_payment_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
       validate: {
         len: [0, 100],
       },
-    },
-    razorpay_signature: {
-      type: DataTypes.TEXT,
-      allowNull: true,
     },
     order_id: {
       type: DataTypes.UUID,
@@ -143,7 +146,7 @@ const Transaction = sequelize.define(
         fields: ["order_id"],
       },
       {
-        fields: ["razorpay_payment_id"],
+        fields: ["merchant_payment_id"],
       },
       {
         fields: ["datetime"],
