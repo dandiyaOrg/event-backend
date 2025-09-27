@@ -411,65 +411,99 @@ const issuedBulkPassEmail = ({
   </div>
   `;
 };
-
 const issuedPassMultiDayEmail = ({
   attendee = {},
-  passes = [], // Array of { subeventName, expiryDate, qrImage, day }
+  passes = [], // Array of { day, subeventName, expiryDate, qrCid?, qrImage?, issued_pass_id? }
   passCategory = "",
   orderNumber = "",
+  billingUserName = "", // NEW: billing user name shown in header
   title = "Your Multi-Day Event Passes",
 }) => {
-  // Build QR code sections grouped by day/subevent
-  const qrSectionsHtml = passes
-    .sort((a, b) => a.day - b.day) // Just in case, sort by day
-    .map(
-      (pass) => `
-    <tr>
-      <td style="padding:20px; border-bottom:2px solid #f0f0f0;">
-        <h3 style="margin:0 0 8px 0; font-size:18px; color:#212529;">
-          Day ${pass.day}: ${pass.subeventName}
-        </h3>
-        <p style="margin:0 0 12px 0; font-size:14px; color:#6c757d;">
-          Expiry: ${new Date(pass.expiryDate).toLocaleDateString()}
-        </p>
-        <img src="${pass.qrImage}" alt="QR Code Day ${pass.day}" style="width:180px; height:180px; border:1px solid #ddd; border-radius:8px;" />
-      </td>
-    </tr>
-  `
-    )
-    .join("\n");
+  // normalize & sort passes by day
+  const normalized = (passes || []).slice().sort((a, b) => {
+    const da = typeof a.day === "number" ? a.day : Infinity;
+    const db = typeof b.day === "number" ? b.day : Infinity;
+    return da - db;
+  });
+
+  const rowsHtml =
+    normalized.length > 0
+      ? normalized
+          .map((p) => {
+            // expiry formatting
+            let expiryDisplay = "";
+            if (p.expiryDate) {
+              try {
+                const d = new Date(p.expiryDate);
+                expiryDisplay = isNaN(d.getTime())
+                  ? String(p.expiryDate)
+                  : d.toLocaleDateString();
+              } catch {
+                expiryDisplay = String(p.expiryDate);
+              }
+            }
+
+            // qr image html: prefer CID (attachment), fallback to qrImage (data URL or public url) else placeholder
+            const qrHtml = p.qrCid
+              ? `<img src="cid:${p.qrCid}" alt="QR Day ${p.day}" style="width:180px;height:180px;border:1px solid #eee;border-radius:8px;object-fit:cover;" />`
+              : p.qrImage
+                ? `<img src="${p.qrImage}" alt="QR Day ${p.day}" style="width:180px;height:180px;border:1px solid #eee;border-radius:8px;object-fit:cover;" />`
+                : `<div style="width:180px;height:180px;display:inline-block;border:1px dashed #ccc;border-radius:8px;line-height:180px;text-align:center;color:#999;font-size:13px;">No QR</div>`;
+
+            return `
+              <tr>
+                <td style="padding:18px 0;border-bottom:1px solid #f2f2f2;">
+                  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;">
+                    <tr>
+                      <td style="vertical-align:top;padding-right:14px;">
+                        <div style="font-size:16px;color:#212529;font-weight:700;margin-bottom:6px;">Day ${p.day || "-"}</div>
+                        <div style="font-size:14px;color:#43484d;margin-bottom:6px;"><strong>Session:</strong> ${p.subeventName || "-"}</div>
+                        ${expiryDisplay ? `<div style="font-size:13px;color:#dc3545;font-weight:600;margin-top:6px;">Expires: ${expiryDisplay}</div>` : ""}
+                        ${passCategory ? `<div style="font-size:13px;color:#6c757d;margin-top:8px;">Category: ${passCategory}</div>` : ""}
+                      </td>
+                      <td style="width:200px;text-align:center;vertical-align:middle;">
+                        ${qrHtml}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            `;
+          })
+          .join("\n")
+      : `<tr><td style="padding:20px;text-align:center;color:#666;">No passes available.</td></tr>`;
 
   return `
   <div style="background:#f8f9fa;font-family:'Segoe UI',Arial,sans-serif;padding:40px;">
-    <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:32px 28px;">
-      <div style="text-align:center; margin-bottom:24px;">
-        <h2 style="font-size:22px; font-weight:700; margin:0; color:#212529;">${title}</h2>
-        <p style="color:#6c757d; font-size:14px;">Order #: ${orderNumber}</p>
+    <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);padding:28px;">
+      <div style="text-align:center;margin-bottom:18px;">
+        <img src="https://cdn-icons-png.flaticon.com/512/190/190411.png" alt="Event Pass" style="width:60px;height:60px;margin-bottom:14px;" />
+        <h2 style="font-size:20px;font-weight:700;margin:0;color:#212529;">${title}</h2>
+        <p style="color:#6c757d;font-size:13px;margin:6px 0 0 0;">Order #: ${orderNumber}</p>
+        ${billingUserName ? `<p style="color:#6c757d;font-size:13px;margin:4px 0 0 0;">To: ${billingUserName}</p>` : ""}
       </div>
-      <p style="font-size:15px; margin:16px 0 8px 0; line-height:1.5;">
+
+      <p style="font-size:15px;margin:14px 0 6px 0;line-height:1.5;">
         Hello <b>${attendee.name || "Attendee"}</b>,
       </p>
-      <p style="font-size:15px; color:#43484d; line-height:1.5; margin-bottom:20px;">
-        Thank you for your booking. Below are your passes for each event day:
+      <p style="font-size:14px;color:#43484d;line-height:1.5;margin-bottom:18px;">
+        Thank you for your booking. Below are your passes for each day of the event. Please present the QR code at check-in for each day.
       </p>
-      
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        ${qrSectionsHtml}
+
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;">
+        <tbody>
+          ${rowsHtml}
+        </tbody>
       </table>
 
-      <p style="font-size:13px; color:#747a80; line-height:1.6; margin:30px 0 0 0; text-align:center;">
-        Please present the QR code(s) at the event check-in each day.
-      </p>
-      <hr style="margin:24px 0; border-top:1px solid #ececec;" />
-      <div style="font-size:13px; color:#444; margin-top:13px; text-align:center;">
-        Thank you for joining us!<br />
+      <p style="font-size:13px;color:#747a80;line-height:1.6;margin:22px 0 0 0;text-align:center;">
+        If you need assistance, reply to this email.<br/>
         &copy; ${new Date().getFullYear()} Your Organization Name
-      </div>
+      </p>
     </div>
   </div>
   `;
 };
-
 export {
   adminOtpLoginEmail,
   emailVerfication,

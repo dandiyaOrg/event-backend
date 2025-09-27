@@ -103,7 +103,6 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       billing_user_id,
       total_amount,
       attendees,
-      pass_id,
       sendAllToBilling,
     } = req.body;
 
@@ -123,6 +122,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         await t.rollback();
         return next(new ApiError(404, "Event not found or inactive"));
       }
+
       // 2) Validate billing user exists
       const billingUser = await BillingUser.findByPk(billing_user_id, {
         transaction: t,
@@ -133,20 +133,13 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         return next(new ApiError(404, "Billing User not found for this order"));
       }
 
-      // 3. Validate global pass existence and active status
-      const pass = await Pass.findOne({
-        where: { pass_id, is_active: true, is_global: true },
-        transaction: t,
-      });
-      if (!pass) {
-        logger.warn(`Invalid or inactive global pass for pass_id: ${pass_id}`);
+      // validate attendees array
+      if (!Array.isArray(attendees) || attendees.length === 0) {
         await t.rollback();
-        return next(
-          new ApiError(400, "Invalid or inactive global pass for this event")
-        );
+        return next(new ApiError(400, "Attendees array is required"));
       }
 
-      // 3. Compute remaining subevents (date >= today) for the event
+      // 3) Compute remaining subevents (date >= today) for the event
       const allSubevents = await SubEvent.findAll({
         where: { event_id },
         attributes: ["subevent_id", "date"],
@@ -161,50 +154,181 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       }
 
       const todayStr = convertToDateOnlyIST(new Date());
-
       const remainingSubevents = allSubevents.filter((s) => {
         const seDateStr = s.date ? convertToDateOnlyIST(s.date) : null;
         return seDateStr && seDateStr >= todayStr;
       });
-
       const remainingIds = remainingSubevents.map((s) => s.subevent_id);
 
       if (remainingIds.length === 0 || remainingIds.length == 1) {
-        logger.warn(`No remaining subevents for this event ${event_id}`);
+        logger.warn(`No remaining global subevents for this event ${event_id}`);
         await t.rollback();
         return next(
-          new ApiError(400, "No remaining subevents for this event ")
+          new ApiError(400, "No remaining global subevents for this event ")
         );
       }
 
-      // 4. Ensure the pass actually covers ALL remaining subevents (true global for remaining days)
-      const coveredCount = await PassSubEvent.count({
-        where: { pass_id, subevent_id: { [Op.in]: remainingIds } },
+      // -------------------------
+      // Build pass -> attendee list map (we need attendee arrays to handle couple pairing)
+      // -------------------------
+      const passToAttendees = new Map();
+      for (const attendee of attendees) {
+        if (!attendee.pass_id) {
+          logger.warn("pass_id missing for an attendee");
+          await t.rollback();
+          return next(
+            new ApiError(400, "pass_id is required for each attendee")
+          );
+        }
+        const list = passToAttendees.get(attendee.pass_id) || [];
+        list.push(attendee);
+        passToAttendees.set(attendee.pass_id, list);
+      }
+      const passIds = Array.from(passToAttendees.keys());
+
+      // 5) Fetch all passes to check prices and ensure they are global & active
+      const passes = await Pass.findAll({
+        where: {
+          pass_id: passIds,
+          is_active: true,
+        },
         transaction: t,
       });
-      if (coveredCount < remainingIds.length) {
-        logger.warn(
-          `Pass ${pass_id} does not cover all remaining subevents for event ${event_id} (covers ${coveredCount}/${remainingIds.length})`
-        );
+
+      if (passes.length !== passToAttendees.size) {
+        logger.warn("One or more passes are invalid or inactive");
         await t.rollback();
         return next(
-          new ApiError(
-            400,
-            "Selected pass is not valid for all remaining subevents of this event"
-          )
+          new ApiError(400, "One or more passes are invalid or inactive")
         );
       }
 
-      // 5. Validate total amount: use pass.final_price or pass.total_price depending on your model
-      const passUnitPrice = Number.parseFloat(
-        pass.final_price ?? pass.total_price ?? 0
+      // Determine couple passes. Assumption: either pass.is_couple === true OR category contains 'couple' (case-insensitive)
+      const isCouplePass = (pass) =>
+        pass.is_couple === true ||
+        (typeof pass.category === "string" &&
+          pass.category.toLowerCase().includes("couple"));
+
+      // 6) For each pass ensure it covers ALL remaining subevents (and for couple passes ensure pairing)
+      // Fetch PassSubEvent counts grouped by pass_id to verify coverage in bulk
+      const passSubEventRows = await PassSubEvent.findAll({
+        where: { pass_id: passIds, subevent_id: { [Op.in]: remainingIds } },
+        attributes: [
+          "pass_id",
+          [sequelize.fn("COUNT", sequelize.col("subevent_id")), "covered"],
+        ],
+        group: ["pass_id"],
+        raw: true,
+        transaction: t,
+      });
+      const coveredMap = new Map(
+        passSubEventRows.map((r) => [r.pass_id, Number(r.covered)])
       );
-      if (Number.isNaN(passUnitPrice) || passUnitPrice < 0) {
-        logger.warn(`Invalid pass unit price for pass ${pass_id}`);
-        await t.rollback();
-        return next(new ApiError(500, "Pass pricing invalid"));
+
+      // qtyMap will contain number of _units_ for each pass (for couple -> number of pairs)
+      const qtyMap = new Map();
+
+      for (const pass of passes) {
+        const pid = pass.pass_id;
+        const cov = coveredMap.get(pid) || 0;
+        if (cov < remainingIds.length) {
+          logger.warn(
+            `Pass ${pid} does not cover all remaining subevents for event ${event_id} (covers ${cov}/${remainingIds.length})`
+          );
+          await t.rollback();
+          return next(
+            new ApiError(
+              400,
+              `Selected pass ${pid} is not valid for all remaining subevents of this event`
+            )
+          );
+        }
+
+        // compute qty based on number of attendees for this pass
+        const attendeesForPass = passToAttendees.get(pid) || [];
+        if (!attendeesForPass.length) {
+          qtyMap.set(pid, 0);
+          continue;
+        }
+
+        if (isCouplePass(pass)) {
+          // Couple pass: require even number of attendees and pair genders
+          if (attendeesForPass.length % 2 !== 0) {
+            logger.warn(
+              `Odd number of attendees (${attendeesForPass.length}) for couple pass ${pid}`
+            );
+            await t.rollback();
+            return next(
+              new ApiError(
+                400,
+                `Couple pass ${pid} requires attendees in pairs (even count).`
+              )
+            );
+          }
+
+          // Count genders (simple mapping: 'male' / 'female' detection)
+          let male = 0;
+          let female = 0;
+          for (const a of attendeesForPass) {
+            const g = (a.gender || "").toString().trim().toLowerCase();
+            if (g === "male" || g === "m") male++;
+            else if (g === "female" || g === "f") female++;
+            else {
+              logger.warn(
+                `Missing or unknown gender for attendee in couple pass ${pid}`
+              );
+              await t.rollback();
+              return next(
+                new ApiError(
+                  400,
+                  `All attendees for couple pass ${pid} must have a 'gender' of male or female to pair them.`
+                )
+              );
+            }
+          }
+
+          // require exact pairing (same number of male and female) to form pairs for the entire list
+          if (male !== female) {
+            logger.warn(
+              `Unmatched genders for couple pass ${pid}: male=${male}, female=${female}`
+            );
+            await t.rollback();
+            return next(
+              new ApiError(
+                400,
+                `Attendees for couple pass ${pid} cannot be paired by gender (male=${male}, female=${female}).`
+              )
+            );
+          }
+
+          const pairs = attendeesForPass.length / 2;
+          qtyMap.set(pid, pairs); // one unit = one couple
+        } else {
+          // non-couple pass: each attendee counts as one unit
+          qtyMap.set(pid, attendeesForPass.length);
+        }
       }
-      const calculatedTotal = passUnitPrice * attendees.length;
+
+      // 7) Calculate total price same as createGlobalPassOrderForBillingUser
+      let calculatedTotal = 0;
+      for (const pass of passes) {
+        const qty = qtyMap.get(pass.pass_id) || 0;
+        const unitPrice = Number.parseFloat(
+          pass.final_price ?? pass.total_price ?? 0
+        );
+        if (Number.isNaN(unitPrice) || unitPrice < 0) {
+          logger.warn(`Invalid pass unit price for pass ${pass.pass_id}`);
+          await t.rollback();
+          return next(new ApiError(500, "Pass pricing invalid"));
+        }
+        if (qty > 10000) {
+          logger.warn(`Unreasonable quantity for pass ${pass.pass_id}`);
+          await t.rollback();
+          return next(new ApiError(400, "Invalid pass quantity"));
+        }
+        calculatedTotal += unitPrice * qty;
+      }
+
       if (
         Number(parseFloat(total_amount)).toFixed(2) !==
         Number(calculatedTotal).toFixed(2)
@@ -221,7 +345,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         );
       }
 
-      // 4. Create Order
+      // 8) Create Order
       const order = await Order.create(
         {
           billing_user_id,
@@ -237,6 +361,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         `Order created successfully with order_id: ${order.order_id}`
       );
 
+      // 9) Ensure EventBillingUsers
       const [eventBillingUser] = await EventBillingUsers.findOrCreate({
         where: { billing_user_id, event_id, order_id: order.order_id },
         defaults: { billing_user_id, event_id, order_id: order.order_id },
@@ -248,115 +373,136 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         return next(new ApiError(400, "Failed to create event billing user"));
       }
 
-      // 5. Create single OrderItem for the global pass
-      const orderItem = await OrderItem.create(
-        {
-          order_id: order.order_id,
-          pass_id,
-          quantity: attendees.length,
-          unit_price: parseFloat(passUnitPrice),
-          total_price: calculatedTotal,
-        },
-        { transaction: t }
-      );
+      // 10) Create OrderItems grouped by pass_id using qtyMap (couples -> pairs)
+      const orderItemsMap = new Map();
+      for (const [pid, qty] of qtyMap.entries()) {
+        // qty is number of units (pairs for couple pass)
+        if (qty <= 0) continue;
+        const pass = passes.find((p) => p.pass_id === pid);
+        const unit_price = parseFloat(
+          pass.final_price ?? pass.total_price ?? 0
+        );
+        const total_price = unit_price * qty;
 
-      const attendeeObjects = [];
-
-      for (const attendeeData of attendees) {
-        const normalizedEmail = attendeeData.email
-          ? attendeeData.email.toLowerCase().trim()
-          : null;
-        const normalizedWhatsapp = attendeeData.whatsapp
-          ? attendeeData.whatsapp.trim()
-          : null;
-
-        // Try to find by email first, otherwise by whatsapp
-        let attendee = null;
-        if (normalizedWhatsapp) {
-          attendee = await Attendee.findOne({
-            where: { whatsapp: normalizedWhatsapp },
-            transaction: t,
-          });
-        }
-        if (!attendee && normalizedEmail) {
-          attendee = await Attendee.findOne({
-            where: { email: normalizedEmail },
-            transaction: t,
-          });
-        }
-        if (!attendee) {
-          attendee = await Attendee.create(
-            {
-              name: attendeeData.name,
-              email: normalizedEmail,
-              whatsapp: normalizedWhatsapp,
-              gender: attendeeData.gender,
-            },
-            { transaction: t }
-          );
-          logger.info(
-            `Attendee created: ${normalizedEmail ?? normalizedWhatsapp}`
-          );
-        }
-
-        // Count how many of the remaining subevents this attendee already linked to
-        const linkedRemainingCount = await SubEventAttendee.count({
-          where: {
-            attendee_id: attendee.attendee_id,
-            subevent_id: { [Op.in]: remainingIds },
+        const orderItem = await OrderItem.create(
+          {
+            order_id: order.order_id,
+            pass_id: pid,
+            quantity: qty,
+            unit_price,
+            total_price,
           },
-          transaction: t,
-        });
+          { transaction: t }
+        );
 
-        // If attendee already linked to all remaining subevents -> already has global pass for remaining
-        if (linkedRemainingCount === remainingIds.length) {
-          logger.warn(
-            `Attendee ${normalizedEmail} already has a global pass for remaining subevents of event ${event_id}`
-          );
-          await t.rollback();
-          return next(
-            new ApiError(
-              400,
-              `Attendee with email ${normalizedEmail} already assigned a global pass for the remaining subevents of this event`
-            )
-          );
+        orderItemsMap.set(pid, orderItem);
+      }
+
+      // 11) Create/Capture attendees, link to SubEventAttendee for remainingIds, and link OrderItemAttendee
+      for (const [pid, attendeeList] of passToAttendees.entries()) {
+        // orderItem for this pass
+        const orderItem = orderItemsMap.get(pid);
+        if (!orderItem) {
+          // if qty was zero (shouldn't happen), skip
+          continue;
         }
 
-        // Link order-item -> attendee
-        await OrderItemAttendee.findOrCreate({
-          where: {
-            order_item_id: orderItem.order_item_id,
-            attendee_id: attendee.attendee_id,
-          },
-          defaults: { assigned_date: new Date() },
-          transaction: t,
-        });
-        const existingLinks = await SubEventAttendee.findAll({
-          where: {
-            attendee_id: attendee.attendee_id,
-            subevent_id: { [Op.in]: remainingIds },
-          },
-          attributes: ["subevent_id"],
-          transaction: t,
-        });
-        const existingIds = new Set(existingLinks.map((r) => r.subevent_id));
-        const toCreate = remainingIds.filter((sid) => !existingIds.has(sid));
-        for (const sid of toCreate) {
-          await SubEventAttendee.create(
-            {
-              subevent_id: sid,
+        // For couple passes, we must also create OrderItemAttendee entries for both members
+        // We will keep linking each attendee individually to the orderItem (so later issuance can find them)
+        for (const attendeeData of attendeeList) {
+          const normalizedEmail = attendeeData.email
+            ? attendeeData.email.toLowerCase().trim()
+            : null;
+          const normalizedWhatsapp = attendeeData.whatsapp
+            ? attendeeData.whatsapp.trim()
+            : null;
+
+          let attendee = null;
+          if (normalizedWhatsapp) {
+            attendee = await Attendee.findOne({
+              where: { whatsapp: normalizedWhatsapp },
+              transaction: t,
+            });
+          }
+          if (!attendee && normalizedEmail) {
+            attendee = await Attendee.findOne({
+              where: { email: normalizedEmail },
+              transaction: t,
+            });
+          }
+          if (!attendee) {
+            attendee = await Attendee.create(
+              {
+                name: attendeeData.name,
+                email: normalizedEmail,
+                whatsapp: normalizedWhatsapp,
+                gender: attendeeData.gender,
+              },
+              { transaction: t }
+            );
+            logger.info(
+              `Attendee created: ${normalizedEmail ?? normalizedWhatsapp}`
+            );
+          }
+
+          // Count how many of the remaining subevents this attendee already linked to
+          const linkedRemainingCount = await SubEventAttendee.count({
+            where: {
               attendee_id: attendee.attendee_id,
-              created_at: new Date(),
-              updated_at: new Date(),
+              subevent_id: { [Op.in]: remainingIds },
             },
-            { transaction: t }
-          );
-        }
+            transaction: t,
+          });
 
-        attendeeObjects.push(attendee.get({ plain: true }));
-      } // end attendees loop
+          if (linkedRemainingCount === remainingIds.length) {
+            logger.warn(
+              `Attendee ${normalizedEmail} already has a global pass for remaining subevents of event ${event_id}`
+            );
+            await t.rollback();
+            return next(
+              new ApiError(
+                400,
+                `Attendee with email ${normalizedEmail} already assigned a global pass for the remaining subevents of this event`
+              )
+            );
+          }
 
-      // All DB operations done — commit
+          // Link order-item -> attendee
+          await OrderItemAttendee.findOrCreate({
+            where: {
+              order_item_id: orderItem.order_item_id,
+              attendee_id: attendee.attendee_id,
+            },
+            defaults: { assigned_date: new Date() },
+            transaction: t,
+          });
+
+          // create missing SubEventAttendee links for remainingIds (one per subevent)
+          const existingLinks = await SubEventAttendee.findAll({
+            where: {
+              attendee_id: attendee.attendee_id,
+              subevent_id: { [Op.in]: remainingIds },
+            },
+            attributes: ["subevent_id"],
+            transaction: t,
+          });
+          const existingIds = new Set(existingLinks.map((r) => r.subevent_id));
+          const toCreate = remainingIds.filter((sid) => !existingIds.has(sid));
+          for (const sid of toCreate) {
+            await SubEventAttendee.create(
+              {
+                subevent_id: sid,
+                attendee_id: attendee.attendee_id,
+                created_at: new Date(),
+                updated_at: new Date(),
+              },
+              { transaction: t }
+            );
+          }
+        } // end attendeeList loop
+      } // end passToAttendees loop
+
+      // commit transaction
       await t.commit();
       logger.info(
         `Global pass order completed successfully for order_id: ${order.order_id}`
@@ -410,6 +556,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       return next(new ApiError(404, "Subevent not found or inactive"));
     }
 
+    // available_quantity still counted per attendee (couple pass consumes 2 seats), so existing check remains:
     if (subevent.available_quantity < attendees.length) {
       logger.warn(
         `Not enough quantity for subevent_id: ${subevent_id}. Requested: ${attendees.length}, Available: ${subevent.available_quantity}`
@@ -423,24 +570,25 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       );
     }
 
-    // 1. Aggregate passes and verify quantities and pricing
-    const passQtyMap = new Map();
+    // -------------------------
+    // Build pass -> attendee list map
+    // -------------------------
+    const passToAttendees = new Map();
     for (const attendee of attendees) {
       if (!attendee.pass_id) {
         logger.warn("pass_id missing for an attendee");
         await t.rollback();
         return next(new ApiError(400, "pass_id is required for each attendee"));
       }
-      passQtyMap.set(
-        attendee.pass_id,
-        (passQtyMap.get(attendee.pass_id) || 0) + 1
-      );
+      const list = passToAttendees.get(attendee.pass_id) || [];
+      list.push(attendee);
+      passToAttendees.set(attendee.pass_id, list);
     }
-
+    const passIds = Array.from(passToAttendees.keys());
     // 2. Fetch all passes to check prices and availability
     const passes = await Pass.findAll({
       where: {
-        pass_id: Array.from(passQtyMap.keys()),
+        pass_id: passIds,
         is_active: true,
       },
       transaction: t,
@@ -459,7 +607,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         )
       );
     }
-    if (passes.length !== passQtyMap.size) {
+    if (passes.length !== passToAttendees.size) {
       logger.warn("One or more passes are invalid or inactive");
       await t.rollback();
       return next(
@@ -467,18 +615,85 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       );
     }
 
-    // 3. Calculate total price
+    // Identify couple passes
+    const isCouplePass = (pass) =>
+      pass.is_couple === true ||
+      (typeof pass.category === "string" &&
+        pass.category.toLowerCase().includes("couple"));
+
+    // 3. Calculate total price with couple pairing (qty = pairs for couple passes)
     let calculatedTotal = 0;
+    const qtyMap = new Map(); // pass_id -> quantity (units)
     for (const pass of passes) {
-      const qty = passQtyMap.get(pass.pass_id);
-      if (qty > 10) {
-        logger.warn(
-          `Pass quantity exceeds limit of 10 for pass_id: ${pass.pass_id}`
-        );
-        await t.rollback();
-        return next(new ApiError(400, "Pass quantity exceeds limit of 10"));
+      const pid = pass.pass_id;
+      const attendeeList = passToAttendees.get(pid) || [];
+      if (!attendeeList.length) {
+        qtyMap.set(pid, 0);
+        continue;
       }
-      calculatedTotal += parseFloat(pass.final_price) * qty;
+
+      if (isCouplePass(pass)) {
+        // couple pass specific validation
+        if (attendeeList.length % 2 !== 0) {
+          logger.warn(
+            `Odd number of attendees (${attendeeList.length}) for couple pass ${pid}`
+          );
+          await t.rollback();
+          return next(
+            new ApiError(
+              400,
+              `Couple pass ${pid} requires attendees in pairs (even count).`
+            )
+          );
+        }
+
+        let male = 0;
+        let female = 0;
+        for (const a of attendeeList) {
+          const g = (a.gender || "").toString().trim().toLowerCase();
+          if (g === "male" || g === "m") male++;
+          else if (g === "female" || g === "f") female++;
+          else {
+            logger.warn(
+              `Missing or unknown gender for attendee in couple pass ${pid}`
+            );
+            await t.rollback();
+            return next(
+              new ApiError(
+                400,
+                `All attendees for couple pass ${pid} must have a gender of male or female to pair them.`
+              )
+            );
+          }
+        }
+
+        if (male !== female) {
+          logger.warn(
+            `Unmatched genders for couple pass ${pid}: male=${male}, female=${female}`
+          );
+          await t.rollback();
+          return next(
+            new ApiError(
+              400,
+              `Attendees for couple pass ${pid} cannot be paired by gender (male=${male}, female=${female}).`
+            )
+          );
+        }
+
+        const pairs = attendeeList.length / 2;
+        qtyMap.set(pid, pairs);
+        calculatedTotal += parseFloat(pass.final_price) * pairs;
+      } else {
+        // standard pass
+        const qty = attendeeList.length;
+        qtyMap.set(pid, qty);
+        if (qty > 10) {
+          logger.warn(`Pass quantity exceeds limit of 10 for pass_id: ${pid}`);
+          await t.rollback();
+          return next(new ApiError(400, "Pass quantity exceeds limit of 10"));
+        }
+        calculatedTotal += parseFloat(pass.final_price) * qty;
+      }
     }
 
     if (parseFloat(total_amount).toFixed(2) !== calculatedTotal.toFixed(2)) {
@@ -514,11 +729,14 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     );
     if (!event_billing_user) {
       logger.error("Failed to creat event billing user");
+      await t.rollback();
       return next(new ApiError(400, "Failed to create event billing user"));
     }
-    // 5. Create OrderItems grouped by pass_id
+
+    // 5. Create OrderItems grouped by pass_id using qtyMap
     const orderItemsMap = new Map();
-    for (const [passId, qty] of passQtyMap.entries()) {
+    for (const [passId, qty] of qtyMap.entries()) {
+      if (!qty || qty <= 0) continue;
       const pass = passes.find((p) => p.pass_id === passId);
       const unit_price = parseFloat(pass.final_price);
       const total_price = unit_price * qty;
@@ -1060,6 +1278,8 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
 });
 
 const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
+  let order;
+  const sequelize = Order.sequelize;
   try {
     const { order_id } = req.body;
 
@@ -1071,7 +1291,7 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
     }
 
     // 1. Fetch order with transaction
-    const order = await Order.findByPk(order_id, {
+    order = await Order.findByPk(order_id, {
       include: [{ model: Transaction, as: "transaction" }],
     });
 
@@ -1080,13 +1300,24 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
       return next(new ApiError(404, `Order not found for id: ${order_id}`));
     }
 
+    if (order.status !== "pending") {
+      logger.warn(
+        `Order has already been processed or is not pending. Current status: ${order.status}`
+      );
+      return next(
+        new ApiError(
+          400,
+          `Order is already processed or not in a pending state.`
+        )
+      );
+    }
     const transaction = order.transaction;
     if (!transaction) {
       logger.warn(`Transaction not found for order ${order_id}`);
       return next(new ApiError(400, "Transaction not found for this order"));
     }
 
-    // 2. Validate transaction status
+    // 2. Validate transaction status & amount
     if (transaction.status !== "success") {
       logger.warn(
         `Transaction status '${transaction.status}' invalid for order ${order_id}`
@@ -1099,89 +1330,141 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
       );
     }
 
-    // 3. Validate order items count (should be exactly 1)
-    const orderItems = await OrderItem.findAll({
-      where: { order_id },
-      include: [{ model: Pass, as: "pass" }],
-    });
-
-    if (orderItems.length !== 1) {
+    const orderTotal = parseFloat(order.total_amount).toFixed(2);
+    const transactionAmount = parseFloat(transaction.amount).toFixed(2);
+    if (orderTotal !== transactionAmount) {
       logger.warn(
-        `Global pass order must have exactly one order item. Found ${orderItems.length}`
+        `Transaction amount mismatch for order ${order_id}: orderTotal=${orderTotal}, transactionAmount=${transactionAmount}`
       );
-      return next(
-        new ApiError(400, "Global pass order must have exactly one order item")
-      );
-    }
-
-    const item = orderItems[0];
-
-    if (!item.pass || !item.pass.is_global) {
-      logger.warn(`Order item ${item.order_item_id} is not a global pass`);
-      return next(
-        new ApiError(400, "The order item does not correspond to a global pass")
-      );
-    }
-
-    const passSubEvents = await PassSubEvent.findAll({
-      where: { pass_id: item.pass.pass_id },
-    });
-
-    if (!passSubEvents.length) {
-      logger.warn(`No subevents linked with global pass ${item.pass.pass_id}`);
       return next(
         new ApiError(
           400,
-          `No subevents linked with global pass ${item.pass.pass_id}`
+          `Transaction amount (${transactionAmount}) does not match order total (${orderTotal}).`
         )
       );
     }
 
-    const subeventIds = passSubEvents.map((pse) => pse.subevent_id);
-    const subevents = await SubEvent.findAll({
-      where: { subevent_id: subeventIds },
-      attributes: ["subevent_id", "date", "name", "day"],
-      order: [["day", "ASC"]],
-    });
-
-    if (!subevents.length) {
-      logger.warn(`Subevents not found for global pass ${item.pass.pass_id}`);
-      return next(
-        new ApiError(400, "Subevent linked to global pass not found")
-      );
-    }
+    // fetch billing user (name used in templates)
     const billingUser = await BillingUser.findByPk(order.billing_user_id);
     if (!billingUser) {
       return next(
         new ApiError(400, "Billing User not found for this order_id")
       );
     }
-    // 4. Fetch attendees linked to the order item
-    const orderItemAttendees = await OrderItemAttendee.findAll({
-      where: { order_item_id: item.order_item_id },
-      include: [{ model: Attendee, as: "attendee" }],
+    const billingUserName = billingUser.name || "Valued Customer";
+
+    // 3. Validate order items count (should be exactly 1 global pass item)
+    const orderItems = await OrderItem.findAll({
+      where: { order_id },
+      include: [{ model: Pass, as: "pass" }],
     });
 
-    if (!orderItemAttendees.length) {
-      logger.warn(`No attendees found for order item ${item.order_item_id}`);
-      return next(
-        new ApiError(400, "No attendees found for the global pass order item")
-      );
+    if (!orderItems.length) {
+      logger.warn(`No order items found for order ${order_id}`);
+      return next(new ApiError(400, "No order items found for this order"));
     }
 
-    logger.info(
-      `Issuing global passes for ${orderItemAttendees.length} attendees`
-    );
+    const issuedPassesForBilling = [];
+    for (const item of orderItems) {
+      if (!item.pass || !item.pass.is_global) {
+        logger.warn(`Order item ${item.order_item_id} is not a global pass`);
+        return next(
+          new ApiError(
+            400,
+            "The order item does not correspond to a global pass"
+          )
+        );
+      }
+      const passId = item.pass.pass_id;
 
-    // 5. Issue passes & send emails
-    await Promise.all(
-      orderItemAttendees.map(async (oia) => {
-        const attendee = oia.attendee;
-        if (!attendee) return;
+      // 4. Fetch PassSubEvent rows for this pass (bulk)
+      const passSubEvents = await PassSubEvent.findAll({
+        where: { pass_id: passId },
+        attributes: ["subevent_id"],
+        raw: true,
+      });
 
-        const issuedPassDetails = await Promise.all(
-          subevents.map(async (subevent) => {
-            const subeventDate = new Date(subevent.date);
+      if (!passSubEvents.length) {
+        logger.warn(`No subevents linked with global pass ${passId}`);
+        return next(
+          new ApiError(400, `No subevents linked with global pass ${passId}`)
+        );
+      }
+
+      const subeventIds = Array.from(
+        new Set(passSubEvents.map((r) => r.subevent_id))
+      );
+
+      // 5. Fetch subevents (ordered by day if you have 'day' on the model)
+      const subevents = await SubEvent.findAll({
+        where: { subevent_id: subeventIds },
+        attributes: ["subevent_id", "date", "name", "day"],
+        order: [["day", "ASC"]],
+        raw: true,
+      });
+
+      if (!subevents.length) {
+        logger.warn(`Subevents not found for global pass ${passId}`);
+        return next(
+          new ApiError(400, "Subevent linked to global pass not found")
+        );
+      }
+
+      // 6. Fetch attendees linked to the order item
+      const orderItemAttendees = await OrderItemAttendee.findAll({
+        where: { order_item_id: item.order_item_id },
+        include: [{ model: Attendee, as: "attendee" }],
+      });
+
+      if (!orderItemAttendees.length) {
+        logger.warn(`No attendees found for order item ${item.order_item_id}`);
+        return next(
+          new ApiError(400, "No attendees found for the global pass order item")
+        );
+      }
+
+      logger.info(
+        `Issuing global passes for ${orderItemAttendees.length} attendees`
+      );
+
+      // 7. Prefetch existing issued passes for these subevents to avoid duplicates
+      const existingIssuedPasses = await IssuedPass.findAll({
+        where: {
+          pass_id: passId,
+          order_item_id: item.order_item_id,
+          subevent_id: { [Op.in]: subeventIds },
+        },
+        attributes: ["issued_pass_id", "attendee_id", "subevent_id"],
+        raw: true,
+      });
+
+      const existingKeys = new Set(
+        existingIssuedPasses.map((p) => `${p.attendee_id}|${p.subevent_id}`)
+      );
+
+      // container for consolidated billing email if required
+
+      // 8. Create issued passes inside a transaction
+      await sequelize.transaction(async (tx) => {
+        for (const oia of orderItemAttendees) {
+          const attendee = oia.attendee;
+          if (!attendee) continue;
+
+          const issuedDetailsForAttendee = [];
+
+          for (let i = 0; i < subevents.length; i++) {
+            const subevent = subevents[i];
+            const key = `${attendee.attendee_id}|${subevent.subevent_id}`;
+
+            if (existingKeys.has(key)) {
+              logger.warn(
+                `Pass already issued for attendee ${attendee.attendee_id} for subevent ${subevent.subevent_id}`
+              );
+              // preserve existing behaviour: error out
+              throw new ApiError(400, "Pass is already issued");
+            }
+
+            const subeventDate = getDateIST(subevent.date);
             const expiryDate = new Date(
               subeventDate.getFullYear(),
               subeventDate.getMonth(),
@@ -1192,43 +1475,32 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
               999
             );
 
-            const existingPass = await IssuedPass.findOne({
-              where: {
-                pass_id: item.pass.pass_id,
+            // create issued pass
+            const issuedPass = await IssuedPass.create(
+              {
+                pass_id: passId,
                 attendee_id: attendee.attendee_id,
                 subevent_id: subevent.subevent_id,
+                admin_id: attendee.admin_id ?? order.admin_id,
+                transaction_id: transaction.transaction_id,
                 order_item_id: item.order_item_id,
+                is_expired: false,
+                issued_date: new Date(),
+                expiry_date: expiryDate,
+                status: "active",
+                used_count: 0,
+                qr_data: null,
+                qr_image: null,
+                sponsored_pass: false,
               },
-            });
-
-            if (existingPass) {
-              logger.warn(
-                `Pass already issued for attendee ${attendee.attendee_id} for subevent ${subevent.subevent_id}`
-              );
-              return next(new ApiError(400, `Pass is already issued`));
-            }
-
-            const issuedPass = await IssuedPass.create({
-              pass_id: item.pass.pass_id,
-              attendee_id: attendee.attendee_id,
-              subevent_id: subevent.subevent_id,
-              admin_id: order.admin_id,
-              transaction_id: transaction.transaction_id,
-              order_item_id: item.order_item_id,
-              is_expired: false,
-              issued_date: new Date(),
-              expiry_date: expiryDate,
-              status: "active",
-              used_count: 0,
-              qr_data: null,
-              qr_image: null,
-              sponsored_pass: false,
-            });
-
-            logger.info(
-              `Issued pass ${issuedPass.issued_pass_id} for attendee ${attendee.attendee_id}, subevent ${subevent.subevent_id}`
+              { transaction: tx }
             );
 
+            logger.info(
+              `Issued global pass ${issuedPass.issued_pass_id} for attendee ${attendee.attendee_id}, subevent ${subevent.subevent_id}`
+            );
+
+            // generate QR (we keep generation as in other functions)
             const qrData = await generateQR({
               orderItemId: item.order_item_id,
               orderId: order_id,
@@ -1241,39 +1513,214 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
                 `Failed to generate QR for issued pass ${issuedPass.issued_pass_id}`,
                 qrData?.error
               );
-              return next(
-                new ApiError(500, "Failed to generate QR code", qrData?.error)
+              throw new ApiError(
+                500,
+                "Failed to generate QR code",
+                qrData?.error
               );
             }
 
-            await issuedPass.update({
-              qr_data: qrData.data,
-              qr_image: qrData.image,
-            });
+            // update issued pass with QR info inside transaction
+            await issuedPass.update(
+              { qr_data: qrData.data, qr_image: qrData.image },
+              { transaction: tx }
+            );
 
-            return {
+            // accumulate for per-attendee and billing templates
+            const rec = {
+              issued_pass_id: issuedPass.issued_pass_id,
+              attendee_id: attendee.attendee_id,
+              attendee_name: attendee.name,
+              attendee_email: attendee.email,
               subeventName: subevent.name,
               expiryDate,
-              qrImage: qrData?.image,
+              qrImage: qrData.image,
+              day: subevent.day ?? i + 1,
             };
-          })
+            issuedDetailsForAttendee.push(rec);
+            issuedPassesForBilling.push(rec);
+
+            // mark as existing
+            existingKeys.add(key);
+          } // end subevents loop
+
+          // send per-attendee multi-day email if sendAllToBilling is falsy
+          if (Boolean(order.sendAllToBilling) === false) {
+            // prepare attachments and template data
+            const attachments = [];
+            const passesForMail = issuedDetailsForAttendee.map((d) => {
+              if (d.qrImage) {
+                try {
+                  const cid = `qr-${d.issued_pass_id}@${order_id}`;
+                  const att = dataUrlToAttachment(
+                    d.qrImage,
+                    `qr-${d.issued_pass_id}.png`,
+                    cid
+                  );
+                  attachments.push(att);
+                } catch (e) {
+                  logger.warn(
+                    `Failed to convert QR for issued_pass ${d.issued_pass_id} to attachment: ${e}`
+                  );
+                }
+              }
+              return {
+                subeventName: d.subeventName,
+                expiryDate: formatExpiryForEmail(d.expiryDate),
+                qrCid: `qr-${d.issued_pass_id}@${order_id}`,
+                day: d.day,
+                issued_pass_id: d.issued_pass_id,
+              };
+            });
+
+            // === UPDATED: include billingUserName in payload ===
+            const { emailData, error } = await sendMail(
+              attendee.email,
+              "issuedPassMultiDay",
+              {
+                attendee,
+                passes: passesForMail,
+                passCategory: item.pass.category,
+                orderNumber: order_id,
+                billingUserName,
+              },
+              attachments
+            );
+
+            if (error !== null) {
+              logger.error(
+                `Error sending multi-day email for attendee ${attendee.attendee_id}`,
+                error
+              );
+              throw new ApiError(
+                500,
+                "Failed to send email to attendee",
+                error
+              );
+            }
+
+            const isSuccess =
+              emailData &&
+              Array.isArray(emailData.accepted) &&
+              emailData.accepted.length > 0 &&
+              emailData.rejected.length === 0 &&
+              emailData.response &&
+              typeof emailData.response === "string" &&
+              emailData.response.startsWith("250");
+
+            if (!isSuccess) {
+              logger.error(
+                `Email sending failed for attendee ${attendee.attendee_id}`,
+                emailData
+              );
+              throw new ApiError(
+                500,
+                "Failed to send email contact admin for the passes",
+                emailData
+              );
+            }
+
+            logger.info(`Email sent to attendee ${attendee.attendee_id}`);
+          }
+        } // end attendees loop
+      }); // end transaction
+
+      // consolidated billing email unchanged (already includes billingUserName)
+    }
+    if (Boolean(order.sendAllToBilling) === true) {
+      const attachments = [];
+      const passesForTemplate = issuedPassesForBilling.map((p) => {
+        const cid = `qr-${p.issued_pass_id}@${order_id}`;
+        if (p.qrImage) {
+          try {
+            const att = dataUrlToAttachment(
+              p.qrImage,
+              `qr-${p.issued_pass_id}.png`,
+              cid
+            );
+            attachments.push(att);
+          } catch (e) {
+            logger.warn(
+              `Failed to convert qrImage to attachment for issued_pass ${p.issued_pass_id}`,
+              e
+            );
+          }
+        }
+        return {
+          attendee_name: p.attendee_name,
+          attendee_email: p.attendee_email,
+          subeventName: p.subeventName,
+          expiryDate: formatExpiryForEmail(p.expiryDate),
+          issued_pass_id: p.issued_pass_id,
+          passCategory: p.passCategory,
+          qrCid: cid,
+          day: p.day,
+        };
+      });
+
+      let billingEmail = billingUser.email;
+      if (!billingEmail) {
+        logger.error(
+          `Billing email not found for order ${order_id} but sendAllToBilling is true`
         );
+        return next(
+          new ApiError(
+            500,
+            "Billing email not found to send consolidated passes"
+          )
+        );
+      }
 
-        await sendMail(attendee.email, "issuedPassMultiDay", {
-          attendee,
-          passes: issuedPassDetails.map((pass, i) => ({
-            ...pass,
-            day: subevents[i]?.day || i + 1,
-          })),
-          passCategory: item.pass.category,
-          orderNumber: order_id,
-        });
+      const billingUserNameFinal = billingUser.name || "Valued Customer";
+      const { emailData, error } = await sendMail(
+        billingEmail,
+        "issuedPassBulk",
+        {
+          orderId: order_id,
+          billingUserName: billingUserNameFinal,
+          passes: passesForTemplate,
+        },
+        attachments
+      );
 
-        logger.info(`Email sent to attendee ${attendee.attendee_id}`);
-      })
-    );
+      if (error !== null) {
+        logger.error(
+          `Failed to send consolidated email to billing ${billingEmail}`,
+          error
+        );
+        return next(
+          new ApiError(500, "Failed to send consolidated passes email", error)
+        );
+      }
 
+      const isSuccess =
+        emailData &&
+        Array.isArray(emailData.accepted) &&
+        emailData.accepted.length > 0 &&
+        Array.isArray(emailData.rejected) &&
+        emailData.rejected.length === 0;
+
+      if (!isSuccess) {
+        logger.error(
+          `Consolidated email reported issues for order ${order_id}`,
+          emailData
+        );
+        return next(
+          new ApiError(
+            500,
+            "Failed to deliver consolidated passes email",
+            emailData
+          )
+        );
+      }
+
+      logger.info(
+        `Consolidated email with ${issuedPassesForBilling.length} passes sent to billing email ${billingEmail}`
+      );
+    }
+    // All good — update order status to confirmed
     logger.info(`All global passes issued successfully for order ${order_id}`);
+    await order.update({ status: "confirmed" });
 
     return res
       .status(200)
@@ -1286,6 +1733,13 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
       );
   } catch (error) {
     logger.error("Error in issueGlobalPassToAttendees", error);
+    if (order && order.status === "pending") {
+      try {
+        await order.update({ status: "failed" });
+      } catch (updateError) {
+        logger.error("Failed to update order to failed status", updateError);
+      }
+    }
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });

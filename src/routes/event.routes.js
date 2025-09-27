@@ -17,7 +17,6 @@ import {
   eventUpdateSchema,
   updateEventStatusSchema,
 } from "../utils/schemaValidation.js";
-import { logger } from "../app.js";
 
 const router = Router();
 
@@ -33,13 +32,18 @@ router
     registerEvent
   );
 // Get events by admin
-router.route("/all").get(verifyJWT,getAllEventByAdmin);
+router.route("/all").get(verifyJWT, getAllEventByAdmin);
 // CRUD operations by ID (generic)
 router
   .route("/:eventId")
-  .delete(verifyJWT,deleteEvent)
-  .get(verifyJWT,getEventDetailById)
-  .put(upload.single("image"), validateBody(eventUpdateSchema),verifyJWT, updateEvent);
+  .delete(verifyJWT, deleteEvent)
+  .get(verifyJWT, getEventDetailById)
+  .put(
+    upload.single("image"),
+    validateBody(eventUpdateSchema),
+    verifyJWT,
+    updateEvent
+  );
 
 router
   .route("/:eventId/status")

@@ -94,12 +94,19 @@ const emailTypeMap = {
   issuedPassMultiDay: {
     from: appEmails.sendTicket,
     subject: "Your Multi-Day Event Passes",
-    template: ({ attendee, passes, passCategory, orderNumber }) =>
+    template: ({
+      attendee,
+      passes,
+      passCategory,
+      orderNumber,
+      billingUserName,
+    }) =>
       emailTemplates.issuedPassMultiDayEmail({
         attendee,
         passes, // array with day, subeventName, expiryDate, qrImage
         passCategory,
         orderNumber,
+        billingUserName,
         title: "Your Multi-Day Event Passes",
       }),
   },

@@ -431,12 +431,11 @@ const createGlobalPassOrderSchema = Joi.object({
   event_id: commonFields.idSchema.label("Event ID"),
   billing_user_id: commonFields.idSchema.label("Billing User ID"),
   total_amount: commonFields.amount.label("Total Amount"),
-  pass_id: commonFields.idSchema.label("Pass Id"),
   sendAllToBilling: commonFields.is_active.label(
     "Send All Emails To Billing User"
   ),
   attendees: Joi.array()
-    .items(attendeeGlobalPassSchema)
+    .items(attendeeSchema)
     .min(1)
     .max(10)
     .required()
@@ -447,6 +446,9 @@ const createGlobalPassOrderSchema = Joi.object({
       "array.max": "Maximum {#limit} attendees allowed",
       "any.required": "{#label} are required",
     }),
+  sendAllToBilling: commonFields.is_active
+    .label("Send All Emails To Billing User")
+    .optional(),
 });
 
 const createPass = Joi.object({
