@@ -152,27 +152,61 @@ const paymentStatus = asyncHandler(async (req, res, next) => {
     }
 
     const transaction = await Transaction.findByPk(transactionId);
-
     if (!transaction) {
       return next(new ApiError(404, "Transaction not found"));
     }
+    const result = await sequelize.transaction(async (t) => {
+      await transaction.update({ status: "success" }, { transaction: t });
+
+      // Fetch and update the related order
+      const order = await Order.findByPk(transaction.order_id, {
+        transaction: t,
+      });
+      if (!order) {
+        // Throwing here will rollback the transaction above
+        throw new ApiError(404, "Order not found for this transaction");
+      }
+
+      // Update order status to confirmed (change string if your domain uses another)
+      await order.update({ status: "confirmed" }, { transaction: t });
+
+      // Return fresh/plain copies for the response
+      const freshTxn = await Transaction.findByPk(transaction.transaction_id, {
+        transaction: t,
+        raw: true,
+      });
+      const freshOrder = await Order.findByPk(order.order_id, {
+        transaction: t,
+        raw: true,
+      });
+
+      return { transaction: freshTxn, order: freshOrder };
+    });
 
     return res.status(200).json(
       new ApiResponse(
         200,
         {
-          transactionId: transaction.transaction_id,
-          status: transaction.status,
-          orderId: transaction.order_id,
-          amount: transaction.amount,
-          method: transaction.method_of_payment,
-          merchantOrderId: transaction.merchant_order_id,
-          merchantPaymentId: transaction.merchant_payment_id,
+          transactionId: result.transaction.transaction_id,
+          status: result.transaction.status,
+          orderId: result.transaction.order_id,
+          amount: result.transaction.amount,
+          method: result.transaction.method_of_payment,
+          merchantOrderId: result.transaction.merchant_order_id,
+          merchantPaymentId: result.transaction.merchant_payment_id,
+          orderStatus: result.order.status,
+          transaction: result.transaction,
+          order: result.order,
         },
-        "Transaction fetched successfully"
+        "Transaction and order updated successfullyTransaction fetched successfully"
       )
     );
   } catch (err) {
+    if (err instanceof ApiError) return next(err);
+    logger.error("Error in paymentStatus update", {
+      message: err.message,
+      stack: err.stack,
+    });
     return next(new ApiError(500, "Server Error", err));
   }
 });
