@@ -112,6 +112,7 @@ const createNewPass = asyncHandler(async (req, res, next) => {
             where: {
               is_global: true,
               is_active: true,
+              category,
             },
             include: [
               {
@@ -157,7 +158,7 @@ const createNewPass = asyncHandler(async (req, res, next) => {
               {
                 model: Pass,
                 as: "pass",
-                where: { is_global: true, is_active: true },
+                where: { is_global: true, is_active: true, category },
                 required: true,
               },
               {

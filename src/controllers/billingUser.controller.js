@@ -512,8 +512,9 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       const phonePeResp = await createPayment({
         amountInPaise,
         redirectUrl:
-          process.env.DEFAULT_REDIRECT_URL ||
-          "https://rkgarbanight.com/payment/result",
+          process.env.DEFAULT_REDIRECT_URL +
+            `?transactionId=${transaction.transaction_id}` ||
+          `https://rkgarbanight.com/payment/result?transactionId=${transaction.transaction_id}`,
         merchantOrderId: order.order_id,
         meta: {
           udf1: billingUser.email || "",
@@ -876,7 +877,7 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     logger.info(`Order completed successfully for order_id: ${order.order_id}`);
     const amountInPaise = Math.round(Number(order.total_amount) * 100); // if order_amount is rupees
     logger.debug(
-      `creating transaction for order ${order_id}, amount: ${amountInPaise} paise`
+      `creating transaction for order ${order.order_id}, amount: ${amountInPaise} paise`
     );
     const transaction = await Transaction.create(
       {
@@ -892,8 +893,9 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     const phonePeResp = await createPayment({
       amountInPaise,
       redirectUrl:
-        process.env.DEFAULT_REDIRECT_URL ||
-        "https://rkgarbanight.com/payment/result",
+        process.env.DEFAULT_REDIRECT_URL +
+          `?transactionId=${transaction.transaction_id}` ||
+        `https://rkgarbanight.com/payment/result?transactionId=${transaction.transaction_id}`,
       merchantOrderId: order.order_id,
       meta: {
         udf1: billingUser.email || "",
@@ -955,9 +957,9 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
       logger.warn(`Order not found for id: ${order_id}`);
       return next(new ApiError(404, `Order not found for id: ${order_id}`));
     }
-    if (order.status !== "pending") {
+    if (order.status !== "confirmed") {
       logger.warn(
-        `Order has already been processed or is not pending. Current status: ${order.status}`
+        `Order is not confirmed yet. Current status: ${order.status}`
       );
       return next(
         new ApiError(
@@ -1349,7 +1351,7 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
     }
 
     logger.info(`All passes issued successfully for order ${order_id}`);
-    await order.update({ status: "confirmed" });
+    await order.update({ status: "expired" });
     return res
       .status(200)
       .json(
@@ -1391,9 +1393,9 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
       return next(new ApiError(404, `Order not found for id: ${order_id}`));
     }
 
-    if (order.status !== "pending") {
+    if (order.status !== "confirmed") {
       logger.warn(
-        `Order has already been processed or is not pending. Current status: ${order.status}`
+        `Order is not being confirmed yet. Current status: ${order.status}`
       );
       return next(
         new ApiError(
@@ -1811,7 +1813,7 @@ const issueGlobalPassToAttendees = asyncHandler(async (req, res, next) => {
     }
     // All good — update order status to confirmed
     logger.info(`All global passes issued successfully for order ${order_id}`);
-    await order.update({ status: "confirmed" });
+    await order.update({ status: "expired" });
 
     return res
       .status(200)

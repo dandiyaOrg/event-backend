@@ -10,6 +10,7 @@ import {
   Admin,
   Event,
   PassSubEvent,
+  sequelize,
 } from "../db/models/index.js";
 import {
   uploadOnCloudinary,
@@ -241,7 +242,6 @@ const deleteEvent = asyncHandler(async (req, res, next) => {
     return next(new ApiError(500, "Internal Server Error", error));
   }
 });
-
 const getEventDetailById = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -249,12 +249,11 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
       logger.warn("getEventDetailById called without eventId");
       return next(new ApiError(400, "Event ID is required in params"));
     }
-
+    console.log(eventId);
     // 1) fetch event basic details
     const event = await Event.findByPk(eventId, {
-      attributes: { exclude: ["createdAt", "updatedAt"] }, // adjust as needed
+      attributes: { exclude: ["createdAt", "updatedAt"] },
     });
-
     if (!event) {
       logger.warn(`Event not found with id ${eventId}`);
       return next(new ApiError(404, `Event with id ${eventId} not found`));
@@ -263,12 +262,12 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
     // 2) fetch all subevents for the event
     const subevents = await SubEvent.findAll({
       where: { event_id: eventId },
-      attributes: ["subevent_id"], // only need id for mapping to PassSubEvent
+      attributes: ["subevent_id"],
       raw: true,
     });
 
     const subeventIds = subevents.map((s) => s.subevent_id);
-
+    console.log(subeventIds);
     // If no subevents, return event with empty passes list
     if (!subeventIds.length) {
       logger.info("Event has no subevents", { eventId });
@@ -282,15 +281,18 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
           )
         );
     }
-
-    // 3) single query to PassSubEvent to get distinct pass_ids for these subevents
+    // 3) Get ALL pass IDs from PassSubEvent for these subevents
     const passIdRows = await PassSubEvent.findAll({
-      where: { subevent_id: subeventIds },
-      attributes: ["pass_id"],
-      group: ["pass_id"], // returns distinct pass_id rows
+      where: {
+        subevent_id: { [Op.in]: subeventIds }, // explicit IN
+        pass_id: { [Op.not]: null }, // avoid null pass_id rows
+      },
+      attributes: [
+        [sequelize.fn("DISTINCT", sequelize.col("pass_id")), "pass_id"],
+      ],
       raw: true,
     });
-
+    console.log(passIdRows);
     const passIds = passIdRows.map((r) => r.pass_id).filter(Boolean);
 
     if (!passIds.length) {
@@ -306,9 +308,13 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
         );
     }
 
-    // 4) fetch pass details
+    // 4) From these pass IDs, get only the GLOBAL and ACTIVE ones
     const passes = await Pass.findAll({
-      where: { pass_id: passIds, is_active: true, is_global: true },
+      where: {
+        pass_id: passIds, // Only passes linked to this event's subevents
+        is_global: true, // Only global passes
+        is_active: true, // Only active passes
+      },
       attributes: [
         "pass_id",
         "category",
@@ -320,9 +326,11 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
       ],
     });
 
-    logger.info("Event fetched successfully with associated passes", {
-      eventId,
-      passCount: passes.length,
+    logger.info("Event fetched successfully with global passes only", {
+      event,
+      totalPassIdsFound: passIds.length,
+      globalActivePassCount: passes.length,
+      passIds: passIds,
     });
 
     // 5) return event + passes_list
@@ -332,7 +340,7 @@ const getEventDetailById = asyncHandler(async (req, res, next) => {
         new ApiResponse(
           200,
           { event, passes_list: passes },
-          "Event and passes fetched successfully"
+          "Event and all passes fetched successfully"
         )
       );
   } catch (error) {
