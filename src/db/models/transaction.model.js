@@ -76,11 +76,8 @@ const Transaction = sequelize.define(
       },
     },
     redirect_url: {
-      type: DataTypes.STRING(100),
+      type: DataTypes.TEXT, // No length limit
       allowNull: true,
-      validate: {
-        len: [0, 200],
-      },
     },
     merchant_payment_id: {
       type: DataTypes.STRING(100),

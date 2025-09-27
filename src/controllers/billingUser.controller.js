@@ -504,22 +504,24 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       } // end passToAttendees loop
 
       // commit transaction
-      await t.commit();
       logger.info(
         `Global pass order completed successfully for order_id: ${order.order_id}`
       );
       const amountInPaise = Math.round(Number(order.total_amount) * 100); // if order_amount is rupees
       logger.debug(
-        `creating transaction for order ${order_id}, amount: ${amountInPaise} paise`
+        `creating transaction for order ${order.order_id}, amount: ${amountInPaise} paise`
       );
-      const transaction = await Transaction.create({
-        order_id: order.order_id,
-        admin_id: order.admin_id,
-        amount: Number(order.total_amount).toFixed(2),
-        merchant_order_id: null,
-        status: "pending",
-      });
-
+      const transaction = await Transaction.create(
+        {
+          order_id: order.order_id,
+          admin_id: order.admin_id,
+          amount: Number(order.total_amount).toFixed(2),
+          merchant_order_id: null,
+          status: "pending",
+        },
+        { transaction: t }
+      );
+      logger.info(`Transaction created with id ${transaction.transaction_id}`);
       const phonePeResp = await createPayment({
         amountInPaise,
         redirectUrl:
@@ -531,7 +533,9 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           udf2: billingUser.mobile_no || "",
         },
       });
-
+      logger.info(
+        `Payment initiated for order ${order.order_id} with response ${phonePeResp.toString()}`
+      );
       await transaction.update(
         {
           merchant_order_id: phonePeResp.merchantOrderId || order.order_id,
@@ -545,6 +549,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         { merchant_order_id: phonePeResp.merchantOrderId || order.order_id },
         { transaction: t }
       );
+      await t.commit();
       return res.status(201).json(
         new ApiResponse(
           201,
@@ -873,19 +878,21 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
     subevent.available_quantity -= attendees.length;
     await subevent.save({ transaction: t });
 
-    await t.commit();
     logger.info(`Order completed successfully for order_id: ${order.order_id}`);
     const amountInPaise = Math.round(Number(order.total_amount) * 100); // if order_amount is rupees
     logger.debug(
       `creating transaction for order ${order_id}, amount: ${amountInPaise} paise`
     );
-    const transaction = await Transaction.create({
-      order_id: order.order_id,
-      admin_id: order.admin_id,
-      amount: Number(order.total_amount).toFixed(2),
-      merchant_order_id: null,
-      status: "pending",
-    });
+    const transaction = await Transaction.create(
+      {
+        order_id: order.order_id,
+        admin_id: order.admin_id,
+        amount: Number(order.total_amount).toFixed(2),
+        merchant_order_id: null,
+        status: "pending",
+      },
+      { transaction: t }
+    );
 
     const phonePeResp = await createPayment({
       amountInPaise,
@@ -912,6 +919,8 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       { merchant_order_id: phonePeResp.merchantOrderId || order.order_id },
       { transaction: t }
     );
+    await t.commit();
+
     return res.status(201).json(
       new ApiResponse(
         201,
