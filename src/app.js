@@ -134,6 +134,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 // Health routes (NEW)
 import healthRoutes from "./routes/health.routes.js";
 app.use("/_health", healthRoutes); // endpoints: /_health/health, /_health/ready, /_health/live
+app.use("/api/v1/payment", paymentRoutes);
 
 app.use(checkClientToken);
 app.use("/api/v1/admin", adminRoutes);
@@ -142,7 +143,6 @@ app.use("/api/v1/employee", employeeRoutes);
 app.use("/api/v1/subevent", subeventRoutes);
 app.use("/api/v1/pass", passRoutes);
 app.use("/api/v1/billingUser", billingUserRoutes);
-app.use("/api/v1/payment", paymentRoutes);
 app.get("/", async (req, res, next) => {
   res.send("hello from server");
 });
