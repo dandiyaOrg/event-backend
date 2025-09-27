@@ -36,7 +36,31 @@ const createNewPass = asyncHandler(async (req, res, next) => {
             ? is_global.toLowerCase() === "true"
             : Boolean(is_global)
           : false;
-
+    if (isGlobalBool) {
+      if (!category.toLowerCase().includes("full")) {
+        logger.warn(
+          "Global pass creation failed: category must include 'Full'"
+        );
+        return next(
+          new ApiError(
+            400,
+            "Category for global pass must include 'Full' (e.g., 'Full Stag Male')"
+          )
+        );
+      }
+    } else {
+      if (category.toLowerCase().includes("full")) {
+        logger.warn(
+          "Non-global pass creation failed: category must NOT include 'Full'"
+        );
+        return next(
+          new ApiError(
+            400,
+            "Category for non-global passes cannot include 'Full'"
+          )
+        );
+      }
+    }
     if (isGlobalBool) {
       if (!event_id) {
         logger.warn("Global pass creation failed: event_id missing");
@@ -64,6 +88,12 @@ const createNewPass = asyncHandler(async (req, res, next) => {
       });
 
       const remainingIds = remainingSubevents.map((s) => s.subevent_id);
+      logger.info("GLOBAL PASS DEBUG | remainingSubevents count", {
+        event_id,
+        remainingCount: remainingIds.length,
+        remainingIds,
+        todayStr,
+      });
       if (remainingIds.length === 0) {
         logger.warn(
           `Global pass creation failed: no remaining subevents for event ${event_id}`
@@ -150,6 +180,12 @@ const createNewPass = asyncHandler(async (req, res, next) => {
           const uncoveredRemainingIds = remainingIds.filter(
             (id) => !coveredSet.has(id)
           );
+          logger.info("GLOBAL PASS DEBUG | coverage result", {
+            coveredCount: coveredSet.size,
+            coveredIds: Array.from(coveredSet),
+            uncoveredCount: uncoveredRemainingIds.length,
+            uncoveredRemainingIds,
+          });
 
           // enforce your business rules
           if (uncoveredRemainingIds.length === 0) {

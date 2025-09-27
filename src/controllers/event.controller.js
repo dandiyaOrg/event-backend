@@ -245,23 +245,96 @@ const deleteEvent = asyncHandler(async (req, res, next) => {
 const getEventDetailById = asyncHandler(async (req, res, next) => {
   try {
     const { eventId } = req.params;
-
     if (!eventId) {
       logger.warn("getEventDetailById called without eventId");
       return next(new ApiError(400, "Event ID is required in params"));
     }
 
-    const event = await Event.findByPk(eventId);
+    // 1) fetch event basic details
+    const event = await Event.findByPk(eventId, {
+      attributes: { exclude: ["createdAt", "updatedAt"] }, // adjust as needed
+    });
 
     if (!event) {
       logger.warn(`Event not found with id ${eventId}`);
       return next(new ApiError(404, `Event with id ${eventId} not found`));
     }
 
-    logger.info("Event fetched successfully", { eventId });
+    // 2) fetch all subevents for the event
+    const subevents = await SubEvent.findAll({
+      where: { event_id: eventId },
+      attributes: ["subevent_id"], // only need id for mapping to PassSubEvent
+      raw: true,
+    });
+
+    const subeventIds = subevents.map((s) => s.subevent_id);
+
+    // If no subevents, return event with empty passes list
+    if (!subeventIds.length) {
+      logger.info("Event has no subevents", { eventId });
+      return res
+        .status(200)
+        .json(
+          new ApiResponse(
+            200,
+            { event, passes_list: [] },
+            "Fetched event and no passes found"
+          )
+        );
+    }
+
+    // 3) single query to PassSubEvent to get distinct pass_ids for these subevents
+    const passIdRows = await PassSubEvent.findAll({
+      where: { subevent_id: subeventIds },
+      attributes: ["pass_id"],
+      group: ["pass_id"], // returns distinct pass_id rows
+      raw: true,
+    });
+
+    const passIds = passIdRows.map((r) => r.pass_id).filter(Boolean);
+
+    if (!passIds.length) {
+      logger.info("No passes associated with event's subevents", { eventId });
+      return res
+        .status(200)
+        .json(
+          new ApiResponse(
+            200,
+            { event, passes_list: [] },
+            "Fetched event and no passes found"
+          )
+        );
+    }
+
+    // 4) fetch pass details
+    const passes = await Pass.findAll({
+      where: { pass_id: passIds, is_active: true, is_global: true },
+      attributes: [
+        "pass_id",
+        "category",
+        "final_price",
+        "total_price",
+        "validity",
+        "is_global",
+        "is_active",
+      ],
+    });
+
+    logger.info("Event fetched successfully with associated passes", {
+      eventId,
+      passCount: passes.length,
+    });
+
+    // 5) return event + passes_list
     return res
       .status(200)
-      .json(new ApiResponse(200, event, "Event fetched successfully"));
+      .json(
+        new ApiResponse(
+          200,
+          { event, passes_list: passes },
+          "Event and passes fetched successfully"
+        )
+      );
   } catch (error) {
     logger.error("Internal server error in getEventDetailById", {
       error,

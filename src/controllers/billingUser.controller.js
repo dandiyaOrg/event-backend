@@ -22,6 +22,7 @@ import { logger } from "../app.js";
 import { sendMail, dataUrlToAttachment } from "../utils/sendMail.js";
 import { generateQR } from "../services/qrGenerator.service.js";
 import {
+  convertToDateOnlyIST,
   formatExpiryForEmail,
   getDateIST,
 } from "../services/dateconversion.service.js";
@@ -111,7 +112,6 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
     );
 
     const t = await sequelize.transaction();
-
     try {
       // 1. Validate event existence and status
       const event = await Event.findOne({
@@ -123,8 +123,17 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         await t.rollback();
         return next(new ApiError(404, "Event not found or inactive"));
       }
+      // 2) Validate billing user exists
+      const billingUser = await BillingUser.findByPk(billing_user_id, {
+        transaction: t,
+      });
+      if (!billingUser) {
+        logger.warn(`BillingUser not found for id: ${billing_user_id}`);
+        await t.rollback();
+        return next(new ApiError(404, "Billing User not found for this order"));
+      }
 
-      // 2. Validate global pass existence and active status
+      // 3. Validate global pass existence and active status
       const pass = await Pass.findOne({
         where: { pass_id, is_active: true, is_global: true },
         transaction: t,
@@ -161,22 +170,18 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
       const remainingIds = remainingSubevents.map((s) => s.subevent_id);
 
       if (remainingIds.length === 0 || remainingIds.length == 1) {
-        logger.warn(`No more than 1 or no subevents for event ${event_id}`);
+        logger.warn(`No remaining subevents for this event ${event_id}`);
         await t.rollback();
         return next(
-          new ApiError(400, "No more than 1 or no subevents for event ")
+          new ApiError(400, "No remaining subevents for this event ")
         );
       }
 
       // 4. Ensure the pass actually covers ALL remaining subevents (true global for remaining days)
       const coveredCount = await PassSubEvent.count({
-        where: {
-          pass_id,
-          subevent_id: { [Op.in]: remainingIds },
-        },
+        where: { pass_id, subevent_id: { [Op.in]: remainingIds } },
         transaction: t,
       });
-
       if (coveredCount < remainingIds.length) {
         logger.warn(
           `Pass ${pass_id} does not cover all remaining subevents for event ${event_id} (covers ${coveredCount}/${remainingIds.length})`
@@ -185,7 +190,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         return next(
           new ApiError(
             400,
-            `Selected pass is not valid for all remaining subevents of this event`
+            "Selected pass is not valid for all remaining subevents of this event"
           )
         );
       }
@@ -200,7 +205,6 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         return next(new ApiError(500, "Pass pricing invalid"));
       }
       const calculatedTotal = passUnitPrice * attendees.length;
-
       if (
         Number(parseFloat(total_amount)).toFixed(2) !==
         Number(calculatedTotal).toFixed(2)
@@ -225,6 +229,7 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           admin_id: event.admin_id,
           total_amount: calculatedTotal,
           sendAllToBilling,
+          status: "pending",
         },
         { transaction: t }
       );
@@ -232,26 +237,24 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         `Order created successfully with order_id: ${order.order_id}`
       );
 
-      const EventBillingUser = await EventBillingUsers.create(
-        {
-          billing_user_id,
-          event_id,
-          order_id: order.order_id,
-        },
-        { transaction: t }
-      );
-      if (!EventBillingUser) {
-        logger.error(`Failed to create Event BillingUser`);
+      const [eventBillingUser] = await EventBillingUsers.findOrCreate({
+        where: { billing_user_id, event_id, order_id: order.order_id },
+        defaults: { billing_user_id, event_id, order_id: order.order_id },
+        transaction: t,
+      });
+      if (!eventBillingUser) {
+        logger.error("Failed to create EventBillingUser");
         await t.rollback();
-        return next(new ApiError(400, "Failed to Create EventBillingUser"));
+        return next(new ApiError(400, "Failed to create event billing user"));
       }
+
       // 5. Create single OrderItem for the global pass
       const orderItem = await OrderItem.create(
         {
           order_id: order.order_id,
           pass_id,
           quantity: attendees.length,
-          unit_price: parseFloat(pass.final_price),
+          unit_price: parseFloat(passUnitPrice),
           total_price: calculatedTotal,
         },
         { transaction: t }
@@ -325,11 +328,30 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
             order_item_id: orderItem.order_item_id,
             attendee_id: attendee.attendee_id,
           },
-          defaults: {
-            assigned_date: new Date(),
-          },
+          defaults: { assigned_date: new Date() },
           transaction: t,
         });
+        const existingLinks = await SubEventAttendee.findAll({
+          where: {
+            attendee_id: attendee.attendee_id,
+            subevent_id: { [Op.in]: remainingIds },
+          },
+          attributes: ["subevent_id"],
+          transaction: t,
+        });
+        const existingIds = new Set(existingLinks.map((r) => r.subevent_id));
+        const toCreate = remainingIds.filter((sid) => !existingIds.has(sid));
+        for (const sid of toCreate) {
+          await SubEventAttendee.create(
+            {
+              subevent_id: sid,
+              attendee_id: attendee.attendee_id,
+              created_at: new Date(),
+              updated_at: new Date(),
+            },
+            { transaction: t }
+          );
+        }
 
         attendeeObjects.push(attendee.get({ plain: true }));
       } // end attendees loop
@@ -424,6 +446,19 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
       transaction: t,
     });
 
+    const hasGlobalPass = passes.some((pass) => pass.is_global === true);
+    if (hasGlobalPass) {
+      logger.warn(
+        "Order creation failed: One or more passes are global (is_global=true)"
+      );
+      await t.rollback();
+      return next(
+        new ApiError(
+          400,
+          "Order cannot contain global passes. Only non-global passes are allowed."
+        )
+      );
+    }
     if (passes.length !== passQtyMap.size) {
       logger.warn("One or more passes are invalid or inactive");
       await t.rollback();
@@ -590,7 +625,6 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
   }
 });
 
-// check the issue-- multiple time pass issued  and booking number
 const issuePassToAttendees = asyncHandler(async (req, res, next) => {
   let order;
   try {
@@ -676,8 +710,19 @@ const issuePassToAttendees = asyncHandler(async (req, res, next) => {
       return next(new ApiError(400, "No order items found for this order"));
     }
 
+    const hasGlobalPass = orderItems.some(
+      (item) => item.pass && item.pass.is_global === true
+    );
+    if (hasGlobalPass) {
+      logger.warn(`Order ${order_id} contains a global pass`);
+      return next(
+        new ApiError(
+          400,
+          "Order contains a global pass (is_global=true); cannot issue passes for such orders."
+        )
+      );
+    }
     logger.info(`Found ${orderItems.length} order items for order ${order_id}`);
-
     // container for all issued passes for this order (used when sendAllToBilling === true)
     const issuedPassesForBilling = [];
 
