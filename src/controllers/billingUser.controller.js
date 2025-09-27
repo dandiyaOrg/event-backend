@@ -209,7 +209,10 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
         pass.is_couple === true ||
         (typeof pass.category === "string" &&
           pass.category.toLowerCase().includes("couple"));
-
+      const isGroupPass = (pass) =>
+        pass.is_group === true ||
+        (typeof pass.category === "string" &&
+          pass.category.toLowerCase().includes("group"));
       // 6) For each pass ensure it covers ALL remaining subevents (and for couple passes ensure pairing)
       // Fetch PassSubEvent counts grouped by pass_id to verify coverage in bulk
       const passSubEventRows = await PassSubEvent.findAll({
@@ -251,8 +254,15 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
           qtyMap.set(pid, 0);
           continue;
         }
+        if (isGroupPass(pass)) {
+          // Group pass: single pass covers all attendees, no per-attendee calculation
+          qtyMap.set(pid, 1); // Always 1 unit for group passes
+          calculatedTotal += parseFloat(pass.final_price); // Single pass price regardless of attendee count
 
-        if (isCouplePass(pass)) {
+          logger.info(
+            `Group pass ${pid} applied for ${attendeeList.length} attendees at single price: ${pass.final_price}`
+          );
+        } else if (isCouplePass(pass)) {
           // Couple pass: require even number of attendees and pair genders
           if (attendeesForPass.length % 2 !== 0) {
             logger.warn(
@@ -445,29 +455,6 @@ const createGlobalPassOrderForBillingUser = asyncHandler(
               `Attendee created: ${normalizedEmail ?? normalizedWhatsapp}`
             );
           }
-
-          // Count how many of the remaining subevents this attendee already linked to
-          const linkedRemainingCount = await SubEventAttendee.count({
-            where: {
-              attendee_id: attendee.attendee_id,
-              subevent_id: { [Op.in]: remainingIds },
-            },
-            transaction: t,
-          });
-
-          if (linkedRemainingCount === remainingIds.length) {
-            logger.warn(
-              `Attendee ${normalizedWhatsapp} already has a global pass for remaining subevents of event ${event_id}`
-            );
-            await t.rollback();
-            return next(
-              new ApiError(
-                400,
-                `Attendee with email ${normalizedWhatsapp} already assigned a global pass for the remaining subevents of this event`
-              )
-            );
-          }
-
           // Link order-item -> attendee
           await OrderItemAttendee.findOrCreate({
             where: {
@@ -662,7 +649,10 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         new ApiError(400, "One or more passes are invalid or inactive")
       );
     }
-
+    const isGroupPass = (pass) =>
+      pass.is_group === true ||
+      (typeof pass.category === "string" &&
+        pass.category.toLowerCase().includes("group"));
     // Identify couple passes
     const isCouplePass = (pass) =>
       pass.is_couple === true ||
@@ -679,8 +669,13 @@ const createOrderForBillingUser = asyncHandler(async (req, res, next) => {
         qtyMap.set(pid, 0);
         continue;
       }
-
-      if (isCouplePass(pass)) {
+      if (isGroupPass(pass)) {
+        qtyMap.set(pid, 1);
+        calculatedTotal += parseFloat(pass.final_price);
+        logger.info(
+          `Group pass ${pid} applied for ${attendeeList.length} attendees at single price: ${pass.final_price}`
+        );
+      } else if (isCouplePass(pass)) {
         // couple pass specific validation
         if (attendeeList.length % 2 !== 0) {
           logger.warn(
